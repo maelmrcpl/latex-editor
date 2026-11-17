@@ -1,0 +1,25 @@
+[Unit]
+Description=Prism LaTeX Editor (Self-Hosted Homelab Server)
+After=network.target
+
+[Service]
+Type=simple
+User=prism-latex
+Group=prism-latex
+WorkingDirectory=/opt/prism-latex
+EnvironmentFile=/etc/prism-latex/prism-latex.env
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node /opt/prism-latex/apps/server/dist/index.js
+Restart=on-failure
+RestartSec=5
+
+# Durcissement sécurité LXC
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/prism-latex
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target

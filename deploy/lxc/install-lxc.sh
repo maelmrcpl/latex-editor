@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ==============================================================================
+# Script d'installation / mise à jour pour conteneur LXC Proxmox (Debian/Ubuntu)
+# ==============================================================================
+
+APP_DIR="/opt/prism-latex"
+DATA_DIR="/var/lib/prism-latex"
+CONF_DIR="/etc/prism-latex"
+ENV_FILE="${CONF_DIR}/prism-latex.env"
+SERVICE_USER="prism-latex"
+
+if [[ "${EUID}" -ne 0 ]]; then
+  echo "Exécute ce script en root dans le conteneur LXC."
+  exit 1
+fi
+
+echo "==> [1/6] Vérification des prérequis système & Node.js 24..."
+apt-get update -qq
+apt-get install -y -qq curl ca-certificates gnupg git tar
+
+if ! command -v node >/dev/null 2>&1 || [[ "$(node -v | cut -d. -f1 | tr -d 'v')" -lt 22 ]]; then
+  curl -fsSL https://deb.nodesource.com/setup_24.x | bash -
+  apt-get install -y -qq nodejs
+fi
+
+echo "==> [2/6] Création de l'utilisateur système et des répertoires..."
+if ! id -u "${SERVICE_USER}" >/dev/null 2>&1; then
+  useradd --system --home-dir "${DATA_DIR}" --shell /usr/sbin/nologin "${SERVICE_USER}"
+fi
+
+mkdir -p "${APP_DIR}" "${DATA_DIR}" "${CONF_DIR}"
+
+echo "==> [3/6] Copie du code source dans ${APP_DIR}..."
+SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+if [[ "${SRC_DIR}" != "${APP_DIR}" ]]; then
+  rsync -a --delete --exclude 'node_modules' --exclude 'data' --exclude '.git' "${SRC_DIR}/" "${APP_DIR}/"
+fi
+
+cd "${APP_DIR}"
+
+echo "==> [4/6] Installation des dépendances npm, téléchargement BusyTeX WASM & build..."
+npm ci
+npm run setup:wasm
+npm run build
+
+chown -R "${SERVICE_USER}:${SERVICE_USER}" "${DATA_DIR}"
+chown -R root:root "${APP_DIR}"
+
+echo "==> [5/6] Configuration de ${ENV_FILE}..."
+if [[ ! -f "${ENV_FILE}" ]]; then
+  read -r -p "Identifiant unique administrateur [mael] : " ADMIN_USER
+  ADMIN_USER="${ADMIN_USER:-mael}"
+  read -r -s -p "Mot de passe administrateur (min 8 caractères) : " ADMIN_PASS
+  echo ""
+
+  HASH_LINE="$(npx tsx apps/server/src/scripts/hash-password.ts "${ADMIN_PASS}" | grep '^ADMIN_PASSWORD_HASH=')"
+
+  cat > "${ENV_FILE}" <<EOF
+NODE_ENV=production
+PORT=3000
+HOST=0.0.0.0
+DATA_DIR=${DATA_DIR}
+ADMIN_USERNAME=${ADMIN_USER}
+${HASH_LINE}
+SESSION_TTL_HOURS=168
+TRUST_PROXY=true
+FORCE_SECURE_COOKIE=false
+EOF
+  chmod 600 "${ENV_FILE}"
+  echo "Fichier ${ENV_FILE} généré avec hash scrypt sécurisé."
+else
+  echo "Fichier ${ENV_FILE} déjà présent, conservé tel quel."
+fi
+
+echo "==> [6/6] Activation du service systemd prism-latex..."
+cp "${APP_DIR}/deploy/lxc/prism-latex.service" /etc/systemd/system/prism-latex.service
+systemctl daemon-reload
+systemctl enable --now prism-latex.service
+
+echo ""
+echo "Installation terminée ! Statut : systemctl status prism-latex"
+echo "Écoute HTTP sur le port 3000 (prêt derrière ton FortiGate)."

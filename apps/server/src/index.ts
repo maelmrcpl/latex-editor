@@ -161,15 +161,19 @@ setInterval(() => {
   }
 }, 3600 * 1000).unref();
 
-serve(
-  {
-    fetch: app.fetch,
-    port: config.port,
-    hostname: config.host,
-  },
-  (info) => {
-    console.log(
-      `[Prism LaTeX] Serveur actif sur http://${info.address}:${info.port} (compte unique: "${config.adminUsername}")`
-    );
-  }
-);
+export { app };
+
+if (process.env.NODE_ENV !== 'test') {
+  serve(
+    {
+      fetch: app.fetch,
+      port: config.port,
+      hostname: config.host,
+    },
+    (info) => {
+      console.log(
+        `[Prism LaTeX] Serveur actif sur http://${info.address}:${info.port} (compte unique: "${config.adminUsername}")`
+      );
+    }
+  );
+}
