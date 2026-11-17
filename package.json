@@ -1,0 +1,21 @@
+{
+  "name": "prism-latex-editor",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Self-hosted LaTeX editor inspired by Prism with client-side WebAssembly compilation",
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev:server": "npm --workspace=@prism-latex/server run dev",
+    "dev:web": "npm --workspace=@prism-latex/web run dev",
+    "build": "npm --workspace=@prism-latex/shared run build && npm --workspace=@prism-latex/web run build && npm --workspace=@prism-latex/server run build",
+    "start": "npm --workspace=@prism-latex/server run start",
+    "setup:wasm": "npm --workspace=@prism-latex/web run setup:wasm",
+    "hash-password": "npx tsx apps/server/src/scripts/hash-password.ts"
+  }
+}

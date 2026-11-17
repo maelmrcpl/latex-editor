@@ -1,0 +1,11 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.env
+.env.local
+data/
+apps/server/data/
+apps/web/public/core/
+apps/web/public/busytex/
+.DS_Store
+Thumbs.db

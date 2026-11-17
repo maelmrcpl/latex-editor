@@ -1,0 +1,578 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { Hono } from 'hono';
+import { zipSync } from 'fflate';
+import type {
+  CompilerEngine,
+  ProjectBundleFile,
+  ProjectDetail,
+  ProjectFileEntry,
+  ProjectSummary,
+  ProjectTemplateId,
+} from '@prism-latex/shared';
+import { db } from '../db.js';
+import type { AppVariables } from '../middleware/auth.js';
+import { requireAuth } from '../middleware/auth.js';
+import {
+  deleteProjectPathDisk,
+  detectFileMetadata,
+  getProjectDir,
+  normalizeProjectPath,
+  readProjectFileDisk,
+  resolveSafeProjectFilePath,
+  writeProjectFileDisk,
+} from '../storage.js';
+import { getTemplateFiles } from '../templates.js';
+
+const VALID_COMPILERS = new Set<CompilerEngine>(['pdflatex', 'xelatex', 'lualatex']);
+const VALID_TEMPLATES = new Set<ProjectTemplateId>(['article', 'report-fr', 'beamer', 'blank']);
+const MAX_UPLOAD_BYTES = 25 * 1024 * 1024; // 25 MB per file
+
+interface DbProjectRow {
+  id: string;
+  name: string;
+  description: string;
+  root_file: string;
+  compiler: CompilerEngine;
+  created_at: number;
+  updated_at: number;
+  file_count?: number;
+}
+
+interface DbFileRow {
+  id: string;
+  project_id: string;
+  path: string;
+  is_binary: number;
+  mime_type: string;
+  size: number;
+  updated_at: number;
+}
+
+function mapProjectSummary(row: DbProjectRow): ProjectSummary {
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description,
+    rootFile: row.root_file,
+    compiler: row.compiler,
+    fileCount: row.file_count ?? 0,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export const projectRoutes = new Hono<{ Variables: AppVariables }>();
+projectRoutes.use('*', requireAuth);
+
+// List all projects
+projectRoutes.get('/', (c) => {
+  const rows = db
+    .prepare(
+      `SELECT p.*, COUNT(f.id) AS file_count
+       FROM projects p
+       LEFT JOIN project_files f ON f.project_id = p.id
+       GROUP BY p.id
+       ORDER BY p.updated_at DESC`
+    )
+    .all() as unknown as DbProjectRow[];
+
+  return c.json({ projects: rows.map(mapProjectSummary) });
+});
+
+// Create a new project from template
+projectRoutes.post('/', async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  const name = typeof body.name === 'string' ? body.name.trim().slice(0, 120) : '';
+  const description =
+    typeof body.description === 'string' ? body.description.trim().slice(0, 500) : '';
+  const templateId: ProjectTemplateId = VALID_TEMPLATES.has(body.template)
+    ? body.template
+    : 'article';
+  const compiler: CompilerEngine = VALID_COMPILERS.has(body.compiler)
+    ? body.compiler
+    : 'pdflatex';
+
+  if (!name) {
+    return c.json({ error: 'Le nom du projet est requis.' }, 400);
+  }
+
+  const projectId = randomUUID();
+  const now = Date.now();
+  const tpl = getTemplateFiles(templateId, name);
+
+  db.prepare(
+    `INSERT INTO projects (id, name, description, root_file, compiler, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
+  ).run(projectId, name, description, tpl.rootFile, compiler, now, now);
+
+  const insertFile = db.prepare(
+    `INSERT INTO project_files (id, project_id, path, is_binary, mime_type, size, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
+  );
+
+  const entries = Object.entries(tpl.files);
+  for (const [relPath, content] of entries) {
+    const cleanPath = normalizeProjectPath(relPath);
+    const size = writeProjectFileDisk(projectId, cleanPath, content);
+    const meta = detectFileMetadata(cleanPath);
+    insertFile.run(
+      randomUUID(),
+      projectId,
+      cleanPath,
+      meta.isBinary ? 1 : 0,
+      meta.mimeType,
+      size,
+      now
+    );
+  }
+
+  return c.json(
+    {
+      project: {
+        id: projectId,
+        name,
+        description,
+        rootFile: tpl.rootFile,
+        compiler,
+        fileCount: entries.length,
+        createdAt: now,
+        updatedAt: now,
+      } satisfies ProjectSummary,
+    },
+    201
+  );
+});
+
+// Get full project detail (with text file contents preloaded)
+projectRoutes.get('/:id', (c) => {
+  const projectId = c.req.param('id');
+  const projectRow = db
+    .prepare('SELECT * FROM projects WHERE id = ? LIMIT 1')
+    .get(projectId) as DbProjectRow | undefined;
+
+  if (!projectRow) {
+    return c.json({ error: 'Projet introuvable.' }, 404);
+  }
+
+  const fileRows = db
+    .prepare('SELECT * FROM project_files WHERE project_id = ? ORDER BY path ASC')
+    .all(projectId) as unknown as DbFileRow[];
+
+  const files: ProjectFileEntry[] = fileRows.map((f) => {
+    let content: string | undefined;
+    if (!f.is_binary && f.size <= 2 * 1024 * 1024) {
+      try {
+        content = readProjectFileDisk(projectId, f.path).toString('utf8');
+      } catch {
+        content = '';
+      }
+    }
+    return {
+      id: f.id,
+      path: f.path,
+      isBinary: Boolean(f.is_binary),
+      mimeType: f.mime_type,
+      size: f.size,
+      updatedAt: f.updated_at,
+      content,
+    };
+  });
+
+  const detail: ProjectDetail = {
+    ...mapProjectSummary({ ...projectRow, file_count: files.length }),
+    files,
+  };
+
+  return c.json({ project: detail });
+});
+
+// Get full project bundle ready for client-side WASM compilation (text + base64 binaries)
+projectRoutes.get('/:id/bundle', (c) => {
+  const projectId = c.req.param('id');
+  const projectRow = db
+    .prepare('SELECT id, root_file, compiler FROM projects WHERE id = ? LIMIT 1')
+    .get(projectId) as { id: string; root_file: string; compiler: CompilerEngine } | undefined;
+
+  if (!projectRow) {
+    return c.json({ error: 'Projet introuvable.' }, 404);
+  }
+
+  const fileRows = db
+    .prepare('SELECT path, is_binary FROM project_files WHERE project_id = ? ORDER BY path ASC')
+    .all(projectId) as unknown as Array<{ path: string; is_binary: number }>;
+
+  const files: ProjectBundleFile[] = [];
+  for (const row of fileRows) {
+    try {
+      const buf = readProjectFileDisk(projectId, row.path);
+      const isBinary = Boolean(row.is_binary);
+      files.push({
+        path: row.path,
+        isBinary,
+        data: isBinary ? buf.toString('base64') : buf.toString('utf8'),
+      });
+    } catch {
+      // Skip missing files gracefully
+    }
+  }
+
+  return c.json({
+    rootFile: projectRow.root_file,
+    compiler: projectRow.compiler,
+    files,
+  });
+});
+
+// Update project metadata (name, description, rootFile, compiler)
+projectRoutes.patch('/:id', async (c) => {
+  const projectId = c.req.param('id');
+  const existing = db
+    .prepare('SELECT * FROM projects WHERE id = ? LIMIT 1')
+    .get(projectId) as DbProjectRow | undefined;
+
+  if (!existing) {
+    return c.json({ error: 'Projet introuvable.' }, 404);
+  }
+
+  const body = await c.req.json().catch(() => ({}));
+  const name =
+    typeof body.name === 'string' && body.name.trim()
+      ? body.name.trim().slice(0, 120)
+      : existing.name;
+  const description =
+    typeof body.description === 'string'
+      ? body.description.trim().slice(0, 500)
+      : existing.description;
+  const rootFile =
+    typeof body.rootFile === 'string' && body.rootFile.trim()
+      ? normalizeProjectPath(body.rootFile)
+      : existing.root_file;
+  const compiler: CompilerEngine = VALID_COMPILERS.has(body.compiler)
+    ? body.compiler
+    : existing.compiler;
+
+  const now = Date.now();
+  db.prepare(
+    `UPDATE projects
+     SET name = ?, description = ?, root_file = ?, compiler = ?, updated_at = ?
+     WHERE id = ?`
+  ).run(name, description, rootFile, compiler, now, projectId);
+
+  return c.json({
+    project: mapProjectSummary({
+      ...existing,
+      name,
+      description,
+      root_file: rootFile,
+      compiler,
+      updated_at: now,
+    }),
+  });
+});
+
+// Delete project
+projectRoutes.delete('/:id', (c) => {
+  const projectId = c.req.param('id');
+  db.prepare('DELETE FROM projects WHERE id = ?').run(projectId);
+  try {
+    const dir = getProjectDir(projectId);
+    if (fs.existsSync(dir)) {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  } catch {
+    // Ignore fs cleanup errors
+  }
+  return c.json({ ok: true });
+});
+
+// Create or update a text file
+projectRoutes.put('/:id/files', async (c) => {
+  const projectId = c.req.param('id');
+  const projectExists = db.prepare('SELECT id FROM projects WHERE id = ? LIMIT 1').get(projectId);
+  if (!projectExists) {
+    return c.json({ error: 'Projet introuvable.' }, 404);
+  }
+
+  const body = await c.req.json().catch(() => ({}));
+  let cleanPath: string;
+  try {
+    cleanPath = normalizeProjectPath(body.path);
+  } catch (err) {
+    return c.json({ error: (err as Error).message }, 400);
+  }
+
+  const content = typeof body.content === 'string' ? body.content : '';
+  const size = writeProjectFileDisk(projectId, cleanPath, content);
+  const meta = detectFileMetadata(cleanPath);
+  const now = Date.now();
+
+  const existingFile = db
+    .prepare('SELECT id FROM project_files WHERE project_id = ? AND path = ? LIMIT 1')
+    .get(projectId, cleanPath) as { id: string } | undefined;
+
+  const fileId = existingFile?.id ?? randomUUID();
+
+  if (existingFile) {
+    db.prepare(
+      `UPDATE project_files
+       SET is_binary = 0, mime_type = ?, size = ?, updated_at = ?
+       WHERE id = ?`
+    ).run(meta.mimeType, size, now, fileId);
+  } else {
+    db.prepare(
+      `INSERT INTO project_files (id, project_id, path, is_binary, mime_type, size, updated_at)
+       VALUES (?, ?, ?, 0, ?, ?, ?)`
+    ).run(fileId, projectId, cleanPath, meta.mimeType, size, now);
+  }
+
+  db.prepare('UPDATE projects SET updated_at = ? WHERE id = ?').run(now, projectId);
+
+  const fileEntry: ProjectFileEntry = {
+    id: fileId,
+    path: cleanPath,
+    isBinary: false,
+    mimeType: meta.mimeType,
+    size,
+    updatedAt: now,
+    content,
+  };
+
+  return c.json({ file: fileEntry });
+});
+
+// Upload binary or text files (images, PDFs, .bib, .sty, etc.)
+projectRoutes.post('/:id/upload', async (c) => {
+  const projectId = c.req.param('id');
+  const projectExists = db.prepare('SELECT id FROM projects WHERE id = ? LIMIT 1').get(projectId);
+  if (!projectExists) {
+    return c.json({ error: 'Projet introuvable.' }, 404);
+  }
+
+  const formData = await c.req.formData();
+  const folderRaw = formData.get('folder');
+  const folderPrefix =
+    typeof folderRaw === 'string' && folderRaw.trim()
+      ? `${normalizeProjectPath(folderRaw)}/`
+      : '';
+
+  const uploaded: ProjectFileEntry[] = [];
+  const items = formData.getAll('files');
+  const now = Date.now();
+
+  for (const item of items) {
+    if (!(item instanceof File)) continue;
+    if (item.size > MAX_UPLOAD_BYTES) {
+      return c.json({ error: `Le fichier "${item.name}" dépasse la limite de 25 Mo.` }, 413);
+    }
+
+    let cleanPath: string;
+    try {
+      cleanPath = normalizeProjectPath(`${folderPrefix}${item.name}`);
+    } catch (err) {
+      return c.json({ error: (err as Error).message }, 400);
+    }
+
+    const buf = Buffer.from(await item.arrayBuffer());
+    const meta = detectFileMetadata(cleanPath, buf);
+    const size = writeProjectFileDisk(projectId, cleanPath, buf);
+
+    const existingFile = db
+      .prepare('SELECT id FROM project_files WHERE project_id = ? AND path = ? LIMIT 1')
+      .get(projectId, cleanPath) as { id: string } | undefined;
+
+    const fileId = existingFile?.id ?? randomUUID();
+
+    if (existingFile) {
+      db.prepare(
+        `UPDATE project_files
+         SET is_binary = ?, mime_type = ?, size = ?, updated_at = ?
+         WHERE id = ?`
+      ).run(meta.isBinary ? 1 : 0, meta.mimeType, size, now, fileId);
+    } else {
+      db.prepare(
+        `INSERT INTO project_files (id, project_id, path, is_binary, mime_type, size, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      ).run(fileId, projectId, cleanPath, meta.isBinary ? 1 : 0, meta.mimeType, size, now);
+    }
+
+    uploaded.push({
+      id: fileId,
+      path: cleanPath,
+      isBinary: meta.isBinary,
+      mimeType: meta.mimeType,
+      size,
+      updatedAt: now,
+      content: !meta.isBinary ? buf.toString('utf8') : undefined,
+    });
+  }
+
+  db.prepare('UPDATE projects SET updated_at = ? WHERE id = ?').run(now, projectId);
+  return c.json({ files: uploaded });
+});
+
+// Rename a file or folder
+projectRoutes.post('/:id/rename', async (c) => {
+  const projectId = c.req.param('id');
+  const projectRow = db
+    .prepare('SELECT id, root_file FROM projects WHERE id = ? LIMIT 1')
+    .get(projectId) as { id: string; root_file: string } | undefined;
+
+  if (!projectRow) {
+    return c.json({ error: 'Projet introuvable.' }, 404);
+  }
+
+  const body = await c.req.json().catch(() => ({}));
+  let oldPath: string;
+  let newPath: string;
+  try {
+    oldPath = normalizeProjectPath(body.oldPath);
+    newPath = normalizeProjectPath(body.newPath);
+  } catch (err) {
+    return c.json({ error: (err as Error).message }, 400);
+  }
+
+  if (oldPath === newPath) {
+    return c.json({ ok: true, rootFile: projectRow.root_file });
+  }
+
+  const oldAbs = resolveSafeProjectFilePath(projectId, oldPath);
+  const newAbs = resolveSafeProjectFilePath(projectId, newPath);
+
+  if (!fs.existsSync(oldAbs)) {
+    return c.json({ error: 'Fichier ou dossier source introuvable.' }, 404);
+  }
+  if (fs.existsSync(newAbs)) {
+    return c.json({ error: 'Un fichier ou dossier porte déjà ce nom.' }, 409);
+  }
+
+  fs.mkdirSync(path.dirname(newAbs), { recursive: true });
+  fs.renameSync(oldAbs, newAbs);
+
+  const now = Date.now();
+  const affectedRows = db
+    .prepare(
+      `SELECT id, path FROM project_files
+       WHERE project_id = ? AND (path = ? OR path LIKE ?)`
+    )
+    .all(projectId, oldPath, `${oldPath}/%`) as unknown as Array<{ id: string; path: string }>;
+
+  const updateStmt = db.prepare('UPDATE project_files SET path = ?, updated_at = ? WHERE id = ?');
+  for (const row of affectedRows) {
+    const updatedRel =
+      row.path === oldPath ? newPath : `${newPath}${row.path.slice(oldPath.length)}`;
+    updateStmt.run(updatedRel, now, row.id);
+  }
+
+  let updatedRoot = projectRow.root_file;
+  if (updatedRoot === oldPath) {
+    updatedRoot = newPath;
+  } else if (updatedRoot.startsWith(`${oldPath}/`)) {
+    updatedRoot = `${newPath}${updatedRoot.slice(oldPath.length)}`;
+  }
+
+  db.prepare('UPDATE projects SET root_file = ?, updated_at = ? WHERE id = ?').run(
+    updatedRoot,
+    now,
+    projectId
+  );
+
+  return c.json({ ok: true, rootFile: updatedRoot });
+});
+
+// Delete a file or folder
+projectRoutes.delete('/:id/files', (c) => {
+  const projectId = c.req.param('id');
+  const rawPath = c.req.query('path') ?? '';
+  let cleanPath: string;
+  try {
+    cleanPath = normalizeProjectPath(rawPath);
+  } catch (err) {
+    return c.json({ error: (err as Error).message }, 400);
+  }
+
+  deleteProjectPathDisk(projectId, cleanPath);
+  db.prepare(
+    `DELETE FROM project_files
+     WHERE project_id = ? AND (path = ? OR path LIKE ?)`
+  ).run(projectId, cleanPath, `${cleanPath}/%`);
+
+  db.prepare('UPDATE projects SET updated_at = ? WHERE id = ?').run(Date.now(), projectId);
+  return c.json({ ok: true });
+});
+
+// Serve raw file (image preview, PDF asset, etc.)
+projectRoutes.get('/:id/raw/*', (c) => {
+  const projectId = c.req.param('id');
+  const prefix = `/api/projects/${projectId}/raw/`;
+  const reqPath = decodeURIComponent(new URL(c.req.url).pathname);
+  const relRaw = reqPath.startsWith(prefix) ? reqPath.slice(prefix.length) : '';
+
+  let cleanPath: string;
+  try {
+    cleanPath = normalizeProjectPath(relRaw);
+  } catch {
+    return c.json({ error: 'Chemin invalide.' }, 400);
+  }
+
+  const fileRow = db
+    .prepare('SELECT mime_type FROM project_files WHERE project_id = ? AND path = ? LIMIT 1')
+    .get(projectId, cleanPath) as { mime_type: string } | undefined;
+
+  if (!fileRow) {
+    return c.json({ error: 'Fichier introuvable.' }, 404);
+  }
+
+  try {
+    const buf = readProjectFileDisk(projectId, cleanPath);
+    return new Response(new Uint8Array(buf), {
+      headers: {
+        'Content-Type': fileRow.mime_type,
+        'Cache-Control': 'no-cache',
+      },
+    });
+  } catch {
+    return c.json({ error: 'Impossible de lire le fichier.' }, 404);
+  }
+});
+
+// Export project as .zip archive
+projectRoutes.get('/:id/export.zip', (c) => {
+  const projectId = c.req.param('id');
+  const projectRow = db
+    .prepare('SELECT name FROM projects WHERE id = ? LIMIT 1')
+    .get(projectId) as { name: string } | undefined;
+
+  if (!projectRow) {
+    return c.json({ error: 'Projet introuvable.' }, 404);
+  }
+
+  const fileRows = db
+    .prepare('SELECT path FROM project_files WHERE project_id = ? ORDER BY path ASC')
+    .all(projectId) as unknown as Array<{ path: string }>;
+
+  const zipInput: Record<string, Uint8Array> = {};
+  for (const row of fileRows) {
+    try {
+      const buf = readProjectFileDisk(projectId, row.path);
+      zipInput[row.path] = new Uint8Array(buf);
+    } catch {
+      // Skip unreadable file
+    }
+  }
+
+  const zipped = zipSync(zipInput, { level: 6 });
+  const safeFilename =
+    projectRow.name
+      .toLowerCase()
+      .replace(/[^a-z0-9-_]+/g, '-')
+      .replace(/^-+|-+$/g, '') || 'latex-project';
+
+  return new Response(Buffer.from(zipped), {
+    headers: {
+      'Content-Type': 'application/zip',
+      'Content-Disposition': `attachment; filename="${safeFilename}.zip"`,
+    },
+  });
+});
