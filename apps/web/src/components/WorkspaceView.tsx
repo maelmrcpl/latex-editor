@@ -9,7 +9,6 @@ import {
   PanelLeftOpen,
   Play,
   Save,
-  Sparkles,
 } from 'lucide-react';
 import type {
   CitationResult,
@@ -27,6 +26,7 @@ import { CodeMirrorPane, type CodeMirrorHandle } from './CodeMirrorPane';
 import { DiagnosticsDrawer } from './DiagnosticsDrawer';
 import { PdfPreviewPane } from './PdfPreviewPane';
 import { SidebarExplorer } from './SidebarExplorer';
+import { SynTeXLogo } from './SynTeXLogo';
 
 interface WorkspaceViewProps {
   projectId: string;
@@ -425,7 +425,8 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ projectId, onBack 
 
           <div className="h-4 w-px bg-zinc-800 mx-0.5" />
 
-          <Sparkles className="w-4 h-4 text-indigo-400 shrink-0" />
+          <SynTeXLogo variant="compact" className="mr-1 shrink-0" />
+          <span className="text-zinc-700">|</span>
           <span className="font-medium text-sm text-zinc-100 truncate max-w-[200px]">
             {project.name}
           </span>
@@ -517,7 +518,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ projectId, onBack 
             onClick={() => void runCompilation()}
             disabled={compiling}
             title="Compiler en PDF via WebAssembly (Ctrl+Entrée)"
-            className="px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 text-xs font-medium text-white flex items-center gap-1.5 shadow-lg shadow-indigo-600/20 transition cursor-pointer"
+            className="px-3.5 py-1.5 rounded-lg bg-[#5236FF] hover:bg-[#634BFF] disabled:opacity-60 text-xs font-medium text-white flex items-center gap-1.5 shadow-lg shadow-[#5236FF]/25 transition cursor-pointer"
           >
             {compiling ? (
               <Loader2 className="w-3.5 h-3.5 animate-spin" />

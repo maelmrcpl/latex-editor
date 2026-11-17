@@ -18,6 +18,7 @@ import type {
   ProjectTemplateId,
 } from '@prism-latex/shared';
 import { api } from '../lib/api';
+import { SynTeXLogo } from './SynTeXLogo';
 
 interface ProjectDashboardProps {
   user: AuthUser;
@@ -126,13 +127,10 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
       {/* Top bar */}
       <header className="border-b border-zinc-900 bg-zinc-950/80 backdrop-blur sticky top-0 z-20">
         <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center">
-              <Sparkles className="w-4 h-4 text-white" />
-            </div>
-            <span className="font-semibold tracking-tight text-zinc-100">Prism LaTeX</span>
-            <span className="text-[11px] px-2 py-0.5 rounded-full bg-zinc-900 border border-zinc-800 text-zinc-400">
-              v1 • WASM Local Engine
+          <div className="flex items-center gap-3.5">
+            <SynTeXLogo variant="full" showTagline />
+            <span className="hidden sm:inline-block text-[11px] px-2 py-0.5 rounded-full bg-zinc-900 border border-zinc-800 text-zinc-400">
+              v1 • WASM Engine
             </span>
           </div>
 
@@ -162,7 +160,7 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
 
           <button
             onClick={() => setShowCreateModal(true)}
-            className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-sm font-medium text-white flex items-center gap-2 shadow-lg shadow-indigo-600/20 transition cursor-pointer self-start"
+            className="px-4 py-2.5 rounded-xl bg-[#5236FF] hover:bg-[#634BFF] text-sm font-medium text-white flex items-center gap-2 shadow-lg shadow-[#5236FF]/25 transition cursor-pointer self-start"
           >
             <FolderPlus className="w-4 h-4" />
             Nouveau Projet

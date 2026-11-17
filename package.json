@@ -11,6 +11,7 @@
     "apps/*"
   ],
   "scripts": {
+    "dev": "node scripts/dev.mjs",
     "dev:server": "npm --workspace=@prism-latex/server run dev",
     "dev:web": "npm --workspace=@prism-latex/web run dev",
     "build": "npm --workspace=@prism-latex/shared run build && npm --workspace=@prism-latex/web run build && npm --workspace=@prism-latex/server run build",

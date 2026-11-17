@@ -172,7 +172,7 @@ if (process.env.NODE_ENV !== 'test') {
     },
     (info) => {
       console.log(
-        `[Prism LaTeX] Serveur actif sur http://${info.address}:${info.port} (compte unique: "${config.adminUsername}")`
+        `[SynTeX] Serveur actif sur http://${info.address}:${info.port} (compte unique: "${config.adminUsername}")`
       );
     }
   );

@@ -1,6 +1,10 @@
-# Prism LaTeX — Éditeur LaTeX Auto-Hébergé (WebAssembly)
+<p align="center">
+  <img src="apps/web/public/brand/syntex-banner-light.jpg" alt="SynTeX — L'éditeur LaTeX collaboratif" width="420" />
+</p>
 
-Éditeur scientifique LaTeX moderne inspiré de **Prism**, conçu pour l'auto-hébergement ultra-léger sur homelab (**conteneur LXC Proxmox derrière FortiGate**).
+# SynTeX — L'éditeur LaTeX collaboratif
+
+Éditeur scientifique LaTeX moderne (inspiré de Prism), conçu pour l'auto-hébergement ultra-léger sur homelab (**conteneur LXC Proxmox derrière FortiGate**).
 
 Contrairement à Overleaf qui exécute TeX Live sur le serveur (plusieurs Go de RAM), **toute la compilation (`pdfLaTeX`, `XeLaTeX`, `LuaLaTeX`, `bibtex8`, `Biber`, `SyncTeX`) tourne en WebAssembly dans un Web Worker du navigateur**. Le serveur Node 24 + SQLite natif consomme **~55–90 Mo de RAM** au repos comme en charge.
 

@@ -66,7 +66,7 @@ export function getTemplateFiles(templateId: ProjectTemplateId, title: string): 
             '\\section{Introduction}',
             '\\label{sec:intro}',
             '',
-            'Welcome to your Prism-inspired \\LaTeX{} workspace. Everything in this project compiles directly inside your browser via WebAssembly, keeping your Proxmox LXC server lightweight.',
+            'Welcome to your SynTeX \\LaTeX{} workspace. Everything in this project compiles directly inside your browser via WebAssembly, keeping your Proxmox LXC server lightweight.',
             '',
             '\\begin{itemize}',
             '  \\item Use \\textbf{Ctrl+Enter} (or \\textbf{Ctrl+S}) to trigger compilation at any time.',
