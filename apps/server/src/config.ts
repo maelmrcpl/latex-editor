@@ -55,6 +55,7 @@ export const config = {
   dataDir,
   projectsDir: path.join(dataDir, 'projects'),
   texCacheDir: path.join(dataDir, 'tex-cache'),
+  webPublicDir: path.resolve(repoRoot, 'apps/web/public'),
   webDistDir: path.resolve(repoRoot, 'apps/web/dist'),
   adminUsername,
   adminPasswordHash,

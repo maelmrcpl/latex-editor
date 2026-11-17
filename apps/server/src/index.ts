@@ -47,6 +47,54 @@ app.get('/api/health', (c) =>
   })
 );
 
+app.get('/api/busytex/manifest', (c) => {
+  const candidates = [
+    path.join(config.webDistDir, 'core/busytex'),
+    path.join(config.webPublicDir, 'core/busytex'),
+  ];
+
+  const foundDir = candidates.find(
+    (dir) => fs.existsSync(dir) && fs.existsSync(path.join(dir, 'busytex_worker.js'))
+  );
+
+  if (!foundDir) {
+    return c.json({
+      available: false,
+      basePath: '/core/busytex',
+      preloadPackages: [],
+      catalogPackages: [],
+    });
+  }
+
+  const entries = fs.readdirSync(foundDir);
+  const dataPairs = entries.filter(
+    (name) =>
+      name.endsWith('.js') &&
+      !name.startsWith('busytex') &&
+      !name.startsWith('biber') &&
+      !['pdftex.js', 'xetex.js', 'luahbtex.js'].includes(name) &&
+      entries.includes(name.replace(/\.js$/, '.data'))
+  );
+
+  // Preload basic TeX Live package first; expose all others in catalogDataPackages for on-demand loading
+  const basicPkg =
+    dataPairs.find((n) => n.includes('basic')) ??
+    dataPairs.find((n) => n.includes('latex-recommended')) ??
+    dataPairs[0];
+
+  const preloadPackages = basicPkg ? [`/core/busytex/${basicPkg}`] : [];
+  const catalogPackages = dataPairs
+    .filter((n) => n !== basicPkg)
+    .map((n) => `/core/busytex/${n}`);
+
+  return c.json({
+    available: true,
+    basePath: '/core/busytex',
+    preloadPackages,
+    catalogPackages,
+  });
+});
+
 app.route('/api/auth', authRoutes);
 app.route('/api/projects', projectRoutes);
 app.route('/api/citations', citationRoutes);
