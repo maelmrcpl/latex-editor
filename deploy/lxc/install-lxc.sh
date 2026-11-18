@@ -50,26 +50,32 @@ chown -R root:root "${APP_DIR}"
 
 echo "==> [5/6] Configuration de ${ENV_FILE}..."
 if [[ ! -f "${ENV_FILE}" ]]; then
-  read -r -p "Identifiant unique administrateur [mael] : " ADMIN_USER
-  ADMIN_USER="${ADMIN_USER:-mael}"
-  read -r -s -p "Mot de passe administrateur (min 8 caractères) : " ADMIN_PASS
+  echo "Connexion via Google : crée un ID client OAuth (Application Web) dans Google Cloud Console."
+  read -r -p "URL publique de l'app (ex. https://latex.mondomaine.fr) : " PUBLIC_URL
+  PUBLIC_URL="${PUBLIC_URL%/}"
+  echo "   -> URI de redirection à autoriser chez Google : ${PUBLIC_URL}/api/auth/google/callback"
+  read -r -p "GOOGLE_CLIENT_ID : " GOOGLE_CLIENT_ID
+  read -r -s -p "GOOGLE_CLIENT_SECRET : " GOOGLE_CLIENT_SECRET
   echo ""
-
-  HASH_LINE="$(npx tsx apps/server/src/scripts/hash-password.ts "${ADMIN_PASS}" | grep '^ADMIN_PASSWORD_HASH=')"
+  read -r -p "Email(s) Google administrateur(s), séparés par des virgules : " ADMIN_EMAILS
+  read -r -p "Domaines email autorisés à s'inscrire (vide = tous) : " ALLOWED_EMAIL_DOMAINS
 
   cat > "${ENV_FILE}" <<EOF
 NODE_ENV=production
 PORT=3000
 HOST=0.0.0.0
 DATA_DIR=${DATA_DIR}
-ADMIN_USERNAME=${ADMIN_USER}
-${HASH_LINE}
+PUBLIC_URL=${PUBLIC_URL}
+GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+ADMIN_EMAILS=${ADMIN_EMAILS}
+ALLOWED_EMAIL_DOMAINS=${ALLOWED_EMAIL_DOMAINS}
 SESSION_TTL_HOURS=168
 TRUST_PROXY=true
 FORCE_SECURE_COOKIE=false
 EOF
   chmod 600 "${ENV_FILE}"
-  echo "Fichier ${ENV_FILE} généré avec hash scrypt sécurisé."
+  echo "Fichier ${ENV_FILE} généré."
 else
   echo "Fichier ${ENV_FILE} déjà présent, conservé tel quel."
 fi
