@@ -1,10 +1,10 @@
 import { Hono } from 'hono';
 import type { CitationResult } from '@prism-latex/shared';
 import type { AppVariables } from '../middleware/auth.js';
-import { requireAuth } from '../middleware/auth.js';
+import { requireApproved, requireAuth } from '../middleware/auth.js';
 
 export const citationRoutes = new Hono<{ Variables: AppVariables }>();
-citationRoutes.use('*', requireAuth);
+citationRoutes.use('*', requireAuth, requireApproved);
 
 function slugifyToken(text: string): string {
   return text

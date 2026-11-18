@@ -16,7 +16,6 @@
     "dev:web": "npm --workspace=@prism-latex/web run dev",
     "build": "npm --workspace=@prism-latex/shared run build && npm --workspace=@prism-latex/web run build && npm --workspace=@prism-latex/server run build",
     "start": "npm --workspace=@prism-latex/server run start",
-    "setup:wasm": "npm --workspace=@prism-latex/web run setup:wasm",
-    "hash-password": "npx tsx apps/server/src/scripts/hash-password.ts"
+    "setup:wasm": "npm --workspace=@prism-latex/web run setup:wasm"
   }
 }

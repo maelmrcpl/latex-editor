@@ -1,12 +1,39 @@
 import type { Context, MiddlewareHandler } from 'hono';
 import { getCookie } from 'hono/cookie';
+import type { AuthUser, UserRole, UserStatus } from '@prism-latex/shared';
 import { config } from '../config.js';
 import { hashSessionToken } from '../crypto.js';
 import { db } from '../db.js';
 
 export interface AppVariables {
-  username: string;
+  user: AuthUser;
   sessionId: string;
+}
+
+export interface DbUserRow {
+  id: string;
+  google_sub: string;
+  email: string;
+  name: string;
+  avatar_url: string | null;
+  role: UserRole;
+  status: UserStatus;
+  created_at: number;
+  updated_at: number;
+  last_login_at: number | null;
+  reviewed_at: number | null;
+  reviewed_by: string | null;
+}
+
+export function mapAuthUser(row: DbUserRow): AuthUser {
+  return {
+    id: row.id,
+    email: row.email,
+    name: row.name,
+    avatarUrl: row.avatar_url,
+    role: row.role,
+    status: row.status,
+  };
 }
 
 export function getClientIp(c: Context): string {
@@ -67,6 +94,10 @@ export const csrfMiddleware: MiddlewareHandler = async (c, next) => {
   return next();
 };
 
+/**
+ * Requires a valid session. Pending / rejected users are authenticated too (so they can see
+ * their status and log out) — use requireApproved to gate the actual service.
+ */
 export const requireAuth: MiddlewareHandler<{ Variables: AppVariables }> = async (c, next) => {
   const rawToken = getCookie(c, config.cookieName);
   if (!rawToken) {
@@ -76,18 +107,46 @@ export const requireAuth: MiddlewareHandler<{ Variables: AppVariables }> = async
   const tokenHash = hashSessionToken(rawToken);
   const row = db
     .prepare(
-      'SELECT id, username, expires_at FROM sessions WHERE token_hash = ? LIMIT 1'
+      `SELECT s.id AS session_id, s.expires_at, u.*
+       FROM sessions s JOIN users u ON u.id = s.user_id
+       WHERE s.token_hash = ? LIMIT 1`
     )
-    .get(tokenHash) as { id: string; username: string; expires_at: number } | undefined;
+    .get(tokenHash) as (DbUserRow & { session_id: string; expires_at: number }) | undefined;
 
   if (!row || row.expires_at <= Date.now()) {
     if (row) {
-      db.prepare('DELETE FROM sessions WHERE id = ?').run(row.id);
+      db.prepare('DELETE FROM sessions WHERE id = ?').run(row.session_id);
     }
     return c.json({ error: 'Session expirée ou invalide.' }, 401);
   }
 
-  c.set('username', row.username);
-  c.set('sessionId', row.id);
+  c.set('user', mapAuthUser(row));
+  c.set('sessionId', row.session_id);
+  return next();
+};
+
+/** Must run after requireAuth. Blocks accounts not (yet) validated by an admin. */
+export const requireApproved: MiddlewareHandler<{ Variables: AppVariables }> = async (c, next) => {
+  const user = c.get('user');
+  if (user.status !== 'approved') {
+    return c.json(
+      {
+        error:
+          user.status === 'rejected'
+            ? "Ton accès a été refusé par l'administrateur."
+            : "Ton compte est en attente de validation par l'administrateur.",
+      },
+      403
+    );
+  }
+  return next();
+};
+
+/** Must run after requireAuth. */
+export const requireAdmin: MiddlewareHandler<{ Variables: AppVariables }> = async (c, next) => {
+  const user = c.get('user');
+  if (user.role !== 'admin' || user.status !== 'approved') {
+    return c.json({ error: 'Accès réservé aux administrateurs.' }, 403);
+  }
   return next();
 };

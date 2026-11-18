@@ -172,7 +172,7 @@ if (process.env.NODE_ENV !== 'test') {
     },
     (info) => {
       console.log(
-        `[SynTeX] Serveur actif sur http://${info.address}:${info.port} (compte unique: "${config.adminUsername}")`
+        `[SynTeX] Serveur actif sur http://${info.address}:${info.port} (connexion Google, ${config.adminEmails.length} admin(s), URL publique : ${config.publicUrl})`
       );
     }
   );

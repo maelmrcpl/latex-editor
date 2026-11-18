@@ -2,8 +2,30 @@ export type CompilerEngine = 'pdflatex' | 'xelatex' | 'lualatex';
 
 export type ProjectTemplateId = 'article' | 'report-fr' | 'beamer' | 'blank';
 
+export type UserRole = 'user' | 'admin';
+
+export type UserStatus = 'pending' | 'approved' | 'rejected';
+
 export interface AuthUser {
-  username: string;
+  id: string;
+  email: string;
+  name: string;
+  avatarUrl: string | null;
+  role: UserRole;
+  status: UserStatus;
+}
+
+export interface AdminUserEntry extends AuthUser {
+  createdAt: number;
+  lastLoginAt: number | null;
+  reviewedAt: number | null;
+  projectCount: number;
+}
+
+export interface ProjectOwner {
+  id: string;
+  email: string;
+  name: string;
 }
 
 export interface ProjectSummary {
@@ -15,6 +37,8 @@ export interface ProjectSummary {
   fileCount: number;
   createdAt: number;
   updatedAt: number;
+  /** Propriétaire du projet (renseigné pour les admins, qui voient tous les projets) */
+  owner?: ProjectOwner | null;
 }
 
 export interface ProjectFileEntry {

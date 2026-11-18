@@ -15,17 +15,23 @@ db.exec(`
   PRAGMA foreign_keys = ON;
   PRAGMA synchronous = NORMAL;
 
-  CREATE TABLE IF NOT EXISTS sessions (
+  CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
-    token_hash TEXT NOT NULL UNIQUE,
-    username TEXT NOT NULL,
-    ip TEXT,
-    user_agent TEXT,
+    google_sub TEXT NOT NULL UNIQUE,
+    email TEXT NOT NULL,
+    name TEXT NOT NULL DEFAULT '',
+    avatar_url TEXT,
+    role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('user', 'admin')),
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
     created_at INTEGER NOT NULL,
-    expires_at INTEGER NOT NULL
+    updated_at INTEGER NOT NULL,
+    last_login_at INTEGER,
+    reviewed_at INTEGER,
+    reviewed_by TEXT
   );
 
-  CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
+  CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+  CREATE INDEX IF NOT EXISTS idx_users_status ON users(status);
 
   CREATE TABLE IF NOT EXISTS projects (
     id TEXT PRIMARY KEY,
@@ -50,6 +56,42 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_project_files_project ON project_files(project_id);
 `);
+
+function tableColumns(table: string): Set<string> {
+  const rows = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  return new Set(rows.map((r) => r.name));
+}
+
+// --- Migration v1 (mono-compte) -> comptes Google ---
+// L'ancienne table sessions était liée à un nom d'utilisateur : on la recrée (déconnecte tout le monde).
+const sessionCols = tableColumns('sessions');
+if (sessionCols.size > 0 && !sessionCols.has('user_id')) {
+  db.exec('DROP TABLE sessions;');
+}
+db.exec(`
+  CREATE TABLE IF NOT EXISTS sessions (
+    id TEXT PRIMARY KEY,
+    token_hash TEXT NOT NULL UNIQUE,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    ip TEXT,
+    user_agent TEXT,
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
+  CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+`);
+
+// Les projets appartiennent désormais à un utilisateur. Les projets existants (owner_id NULL)
+// sont rattachés au premier administrateur qui se connecte (voir claimOrphanProjects).
+if (!tableColumns('projects').has('owner_id')) {
+  db.exec('ALTER TABLE projects ADD COLUMN owner_id TEXT REFERENCES users(id) ON DELETE SET NULL;');
+}
+db.exec('CREATE INDEX IF NOT EXISTS idx_projects_owner ON projects(owner_id);');
+
+export function claimOrphanProjects(adminUserId: string): void {
+  db.prepare('UPDATE projects SET owner_id = ? WHERE owner_id IS NULL').run(adminUserId);
+}
 
 export function purgeExpiredSessions(): void {
   db.prepare('DELETE FROM sessions WHERE expires_at <= ?').run(Date.now());
