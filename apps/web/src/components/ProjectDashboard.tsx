@@ -10,6 +10,7 @@ import {
   ScrollText,
   Sparkles,
   Trash2,
+  Users,
 } from 'lucide-react';
 import type {
   AuthUser,
@@ -23,6 +24,7 @@ import { SynTeXLogo } from './SynTeXLogo';
 interface ProjectDashboardProps {
   user: AuthUser;
   onOpenProject: (projectId: string) => void;
+  onOpenAdmin: () => void;
   onLogout: () => void;
 }
 
@@ -61,8 +63,10 @@ const TEMPLATES: Array<{
 export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
   user,
   onOpenProject,
+  onOpenAdmin,
   onLogout,
 }) => {
+  const isAdmin = user.role === 'admin';
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -134,10 +138,29 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
             </span>
           </div>
 
-          <div className="flex items-center gap-4">
-            <span className="text-xs text-zinc-400">
-              Connecté en tant que <strong className="text-zinc-200">{user.username}</strong>
+          <div className="flex items-center gap-3">
+            <span className="hidden sm:flex items-center gap-2 text-xs text-zinc-400">
+              {user.avatarUrl && (
+                <img
+                  src={user.avatarUrl}
+                  alt=""
+                  referrerPolicy="no-referrer"
+                  className="w-6 h-6 rounded-full"
+                />
+              )}
+              <strong className="text-zinc-200 font-medium" title={user.email}>
+                {user.name}
+              </strong>
             </span>
+            {isAdmin && (
+              <button
+                onClick={onOpenAdmin}
+                className="text-xs px-3 py-1.5 rounded-lg border border-zinc-800 hover:bg-zinc-900 text-zinc-300 flex items-center gap-1.5 transition cursor-pointer"
+              >
+                <Users className="w-3.5 h-3.5" />
+                Utilisateurs
+              </button>
+            )}
             <button
               onClick={onLogout}
               className="text-xs px-3 py-1.5 rounded-lg border border-zinc-800 hover:bg-zinc-900 text-zinc-300 flex items-center gap-1.5 transition cursor-pointer"
@@ -152,7 +175,9 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
       <main className="max-w-6xl mx-auto px-6 py-10">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
           <div>
-            <h1 className="text-2xl font-semibold tracking-tight text-white">Mes Projets LaTeX</h1>
+            <h1 className="text-2xl font-semibold tracking-tight text-white">
+              {isAdmin ? 'Tous les projets LaTeX' : 'Mes Projets LaTeX'}
+            </h1>
             <p className="text-sm text-zinc-400 mt-1">
                Compilation WebAssembly côté client • Zéro charge CPU/RAM sur ton homelab
             </p>
@@ -201,6 +226,12 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
                       {p.compiler}
                     </span>
                   </div>
+
+                  {isAdmin && p.owner && p.owner.id !== user.id && (
+                    <p className="text-[11px] text-amber-300/80 mt-1 truncate" title={p.owner.email}>
+                      Propriétaire : {p.owner.name || p.owner.email}
+                    </p>
+                  )}
 
                   {p.description ? (
                     <p className="text-xs text-zinc-400 mt-2 line-clamp-2">{p.description}</p>

@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import type { AuthUser } from '@prism-latex/shared';
+import { AdminPanel } from './components/AdminPanel';
 import { LoginScreen } from './components/LoginScreen';
+import { PendingApprovalScreen } from './components/PendingApprovalScreen';
 import { ProjectDashboard } from './components/ProjectDashboard';
 import { WorkspaceView } from './components/WorkspaceView';
 import { api } from './lib/api';
@@ -13,11 +15,13 @@ export const App: React.FC = () => {
     const m = window.location.hash.match(/^#\/project\/([a-zA-Z0-9_-]+)$/);
     return m ? m[1] : null;
   });
+  const [showAdmin, setShowAdmin] = useState(() => window.location.hash === '#/admin');
 
   useEffect(() => {
     const onHashChange = () => {
       const m = window.location.hash.match(/^#\/project\/([a-zA-Z0-9_-]+)$/);
       setActiveProjectId(m ? m[1] : null);
+      setShowAdmin(window.location.hash === '#/admin');
     };
     window.addEventListener('hashchange', onHashChange);
     return () => window.removeEventListener('hashchange', onHashChange);
@@ -39,6 +43,12 @@ export const App: React.FC = () => {
   const closeProject = () => {
     window.location.hash = '#/';
     setActiveProjectId(null);
+    setShowAdmin(false);
+  };
+
+  const openAdmin = () => {
+    window.location.hash = '#/admin';
+    setShowAdmin(true);
   };
 
   const handleLogout = async () => {
@@ -57,7 +67,15 @@ export const App: React.FC = () => {
   }
 
   if (!user) {
-    return <LoginScreen onAuthenticated={(u) => setUser(u)} />;
+    return <LoginScreen />;
+  }
+
+  if (user.status !== 'approved') {
+    return <PendingApprovalScreen user={user} onUserUpdated={setUser} onLogout={handleLogout} />;
+  }
+
+  if (showAdmin && user.role === 'admin') {
+    return <AdminPanel currentUser={user} onBack={closeProject} />;
   }
 
   if (activeProjectId) {
@@ -68,6 +86,7 @@ export const App: React.FC = () => {
     <ProjectDashboard
       user={user}
       onOpenProject={openProject}
+      onOpenAdmin={openAdmin}
       onLogout={handleLogout}
     />
   );

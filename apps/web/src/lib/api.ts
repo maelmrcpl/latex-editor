@@ -1,4 +1,5 @@
 import type {
+  AdminUserEntry,
   AuthUser,
   CitationResult,
   CompilerEngine,
@@ -44,11 +45,9 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
 export const api = {
   auth: {
     me: () => requestJson<{ user: AuthUser }>('/api/auth/me'),
-    login: (username: string, password: string) =>
-      requestJson<{ user: AuthUser }>('/api/auth/login', {
-        method: 'POST',
-        body: JSON.stringify({ username, password }),
-      }),
+    config: () => requestJson<{ googleEnabled: boolean }>('/api/auth/config'),
+    /** Navigation pleine page (pas de fetch) : redirige vers Google */
+    googleStartUrl: '/api/auth/google/start',
     logout: () =>
       requestJson<{ ok: boolean }>('/api/auth/logout', {
         method: 'POST',
@@ -120,6 +119,15 @@ export const api = {
     rawUrl: (projectId: string, path: string) =>
       `/api/projects/${projectId}/raw/${path.split('/').map(encodeURIComponent).join('/')}`,
     exportZipUrl: (projectId: string) => `/api/projects/${projectId}/export.zip`,
+  },
+
+  admin: {
+    listUsers: () => requestJson<{ users: AdminUserEntry[] }>('/api/admin/users'),
+    setUserStatus: (userId: string, status: AdminUserEntry['status']) =>
+      requestJson<{ user: AdminUserEntry }>(`/api/admin/users/${encodeURIComponent(userId)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status }),
+      }),
   },
 
   citations: {
