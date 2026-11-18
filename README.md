@@ -4,7 +4,7 @@
 
 # SynTeX — L'éditeur LaTeX collaboratif
 
-Éditeur scientifique LaTeX moderne (inspiré de Prism), conçu pour l'auto-hébergement ultra-léger sur homelab (**conteneur LXC Proxmox derrière FortiGate**).
+Éditeur scientifique LaTeX moderne, conçu pour l'auto-hébergement ultra-léger sur homelab.
 
 Contrairement à Overleaf qui exécute TeX Live sur le serveur (plusieurs Go de RAM), **toute la compilation (`pdfLaTeX`, `XeLaTeX`, `LuaLaTeX`, `bibtex8`, `Biber`, `SyncTeX`) tourne en WebAssembly dans un Web Worker du navigateur**. Le serveur Node 24 + SQLite natif consomme **~55–90 Mo de RAM** au repos comme en charge.
 
