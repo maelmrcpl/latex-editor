@@ -91,3 +91,15 @@ Le script installe Node 24, télécharge les assets WASM BusyTeX (pour qu'ils so
 - [x] **v1** : Éditeur split-screen CodeMirror 6, multi-fichiers, compilation WASM client-side, PDF.js + SyncTeX, citations arXiv/Crossref, connexion Google avec validation admin, déploiement LXC.
 - [ ] **v2** : Assistant IA contextuel (multi-provider / Ollama) avec suggestions et modifications en **diff inline** (`@codemirror/merge`) façon Prism.
 - [ ] **v3** : Collaboration temps réel multi-utilisateurs via CRDT **Yjs** (`y-codemirror.next` + WebSocket léger).
+
+---
+
+## Licence
+
+SynTeX est distribué sous licence **GNU Affero General Public License v3.0 ou ultérieure** (`AGPL-3.0-or-later`) — voir [LICENSE](LICENSE).
+
+Tu peux utiliser, modifier et redistribuer le code librement. Si tu héberges une version **modifiée** accessible à d'autres utilisateurs via le réseau, tu dois leur donner accès au code source de cette version (article 13 de l'AGPL).
+
+Copyright © 2026 Marcepoil Mael.
+
+Le moteur de compilation embarqué [`texlyre-busytex`](https://www.npmjs.com/package/texlyre-busytex) est lui aussi sous AGPL-3.0 ; les autres dépendances (CodeMirror, PDF.js, Hono, React…) sont sous licences permissives compatibles (MIT, Apache-2.0, ISC).

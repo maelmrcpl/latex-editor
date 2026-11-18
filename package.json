@@ -1,6 +1,7 @@
 {
   "name": "prism-latex-editor",
   "version": "0.1.0",
+  "license": "AGPL-3.0-or-later",
   "private": true,
   "description": "Self-hosted LaTeX editor inspired by Prism with client-side WebAssembly compilation",
   "engines": {
