@@ -5,6 +5,7 @@ import { Hono } from 'hono';
 import { config } from './config.js';
 import { purgeExpiredSessions } from './db.js';
 import { type AppVariables, csrfMiddleware } from './middleware/auth.js';
+import { adminRoutes } from './routes/admin.js';
 import { authRoutes } from './routes/auth.js';
 import { citationRoutes } from './routes/citations.js';
 import { projectRoutes } from './routes/projects.js';
@@ -96,6 +97,7 @@ app.get('/api/busytex/manifest', (c) => {
 });
 
 app.route('/api/auth', authRoutes);
+app.route('/api/admin', adminRoutes);
 app.route('/api/projects', projectRoutes);
 app.route('/api/citations', citationRoutes);
 

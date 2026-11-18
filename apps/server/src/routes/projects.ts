@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import type { MiddlewareHandler } from 'hono';
 import { Hono } from 'hono';
 import { zipSync } from 'fflate';
 import type {
@@ -13,7 +14,7 @@ import type {
 } from '@prism-latex/shared';
 import { db } from '../db.js';
 import type { AppVariables } from '../middleware/auth.js';
-import { requireAuth } from '../middleware/auth.js';
+import { requireApproved, requireAuth } from '../middleware/auth.js';
 import {
   deleteProjectPathDisk,
   detectFileMetadata,
@@ -37,7 +38,10 @@ interface DbProjectRow {
   compiler: CompilerEngine;
   created_at: number;
   updated_at: number;
+  owner_id: string | null;
   file_count?: number;
+  owner_email?: string | null;
+  owner_name?: string | null;
 }
 
 interface DbFileRow {
@@ -60,23 +64,48 @@ function mapProjectSummary(row: DbProjectRow): ProjectSummary {
     fileCount: row.file_count ?? 0,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    owner: row.owner_id
+      ? { id: row.owner_id, email: row.owner_email ?? '', name: row.owner_name ?? '' }
+      : null,
   };
 }
 
 export const projectRoutes = new Hono<{ Variables: AppVariables }>();
-projectRoutes.use('*', requireAuth);
+projectRoutes.use('*', requireAuth, requireApproved);
 
-// List all projects
+/**
+ * Contrôle d'accès : un utilisateur n'accède qu'à ses propres projets, un admin à tous.
+ * On répond 404 (et non 403) pour ne pas révéler l'existence des projets des autres.
+ */
+const requireProjectAccess: MiddlewareHandler<{ Variables: AppVariables }> = async (c, next) => {
+  const projectId = c.req.param('id') ?? '';
+  const user = c.get('user');
+  const row = db.prepare('SELECT owner_id FROM projects WHERE id = ? LIMIT 1').get(projectId) as
+    | { owner_id: string | null }
+    | undefined;
+  if (!row || (user.role !== 'admin' && row.owner_id !== user.id)) {
+    return c.json({ error: 'Projet introuvable.' }, 404);
+  }
+  return next();
+};
+projectRoutes.use('/:id', requireProjectAccess);
+projectRoutes.use('/:id/*', requireProjectAccess);
+
+// List projects (own projects; admins see everyone's)
 projectRoutes.get('/', (c) => {
+  const user = c.get('user');
+  const isAdmin = user.role === 'admin';
   const rows = db
     .prepare(
-      `SELECT p.*, COUNT(f.id) AS file_count
+      `SELECT p.*, COUNT(f.id) AS file_count, u.email AS owner_email, u.name AS owner_name
        FROM projects p
        LEFT JOIN project_files f ON f.project_id = p.id
+       LEFT JOIN users u ON u.id = p.owner_id
+       ${isAdmin ? '' : 'WHERE p.owner_id = ?'}
        GROUP BY p.id
        ORDER BY p.updated_at DESC`
     )
-    .all() as unknown as DbProjectRow[];
+    .all(...(isAdmin ? [] : [user.id])) as unknown as DbProjectRow[];
 
   return c.json({ projects: rows.map(mapProjectSummary) });
 });
@@ -102,10 +131,11 @@ projectRoutes.post('/', async (c) => {
   const now = Date.now();
   const tpl = getTemplateFiles(templateId, name);
 
+  const user = c.get('user');
   db.prepare(
-    `INSERT INTO projects (id, name, description, root_file, compiler, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
-  ).run(projectId, name, description, tpl.rootFile, compiler, now, now);
+    `INSERT INTO projects (id, name, description, root_file, compiler, owner_id, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(projectId, name, description, tpl.rootFile, compiler, user.id, now, now);
 
   const insertFile = db.prepare(
     `INSERT INTO project_files (id, project_id, path, is_binary, mime_type, size, updated_at)
@@ -139,6 +169,7 @@ projectRoutes.post('/', async (c) => {
         fileCount: entries.length,
         createdAt: now,
         updatedAt: now,
+        owner: { id: user.id, email: user.email, name: user.name },
       } satisfies ProjectSummary,
     },
     201
@@ -149,7 +180,11 @@ projectRoutes.post('/', async (c) => {
 projectRoutes.get('/:id', (c) => {
   const projectId = c.req.param('id');
   const projectRow = db
-    .prepare('SELECT * FROM projects WHERE id = ? LIMIT 1')
+    .prepare(
+      `SELECT p.*, u.email AS owner_email, u.name AS owner_name
+       FROM projects p LEFT JOIN users u ON u.id = p.owner_id
+       WHERE p.id = ? LIMIT 1`
+    )
     .get(projectId) as DbProjectRow | undefined;
 
   if (!projectRow) {
@@ -229,7 +264,11 @@ projectRoutes.get('/:id/bundle', (c) => {
 projectRoutes.patch('/:id', async (c) => {
   const projectId = c.req.param('id');
   const existing = db
-    .prepare('SELECT * FROM projects WHERE id = ? LIMIT 1')
+    .prepare(
+      `SELECT p.*, u.email AS owner_email, u.name AS owner_name
+       FROM projects p LEFT JOIN users u ON u.id = p.owner_id
+       WHERE p.id = ? LIMIT 1`
+    )
     .get(projectId) as DbProjectRow | undefined;
 
   if (!existing) {
