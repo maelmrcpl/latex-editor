@@ -162,7 +162,12 @@ authRoutes.get('/google/callback', async (c) => {
       signal: AbortSignal.timeout(10_000),
     });
     if (!res.ok) {
-      console.error(`[auth] Échange de code Google refusé (HTTP ${res.status})`);
+      // Corps d'erreur OAuth de Google ({ error, error_description }) : ne contient aucun secret
+      const detail = (await res.text().catch(() => '')).replace(/\s+/g, ' ').slice(0, 300);
+      console.error(
+        `[auth] Échange de code Google refusé (HTTP ${res.status}) : ${detail} ` +
+          `[redirect_uri=${config.google.redirectUri}]`
+      );
       return redirectWithError(c, 'token_exchange');
     }
     const data = (await res.json()) as { id_token?: string };
