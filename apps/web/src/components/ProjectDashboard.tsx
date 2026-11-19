@@ -191,9 +191,6 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
             <h1 className="text-2xl font-semibold tracking-tight text-white">
               {isAdmin ? 'Tous les projets LaTeX' : 'Mes Projets LaTeX'}
             </h1>
-            <p className="text-sm text-zinc-400 mt-1">
-               Compilation WebAssembly côté client • Zéro charge CPU/RAM sur ton homelab
-            </p>
             {storage && <StorageMeter storage={storage} isAdmin={isAdmin} />}
           </div>
 
