@@ -8,6 +8,7 @@ import type {
   ProjectFileEntry,
   ProjectSummary,
   ProjectTemplateId,
+  StorageUsage,
 } from '@prism-latex/shared';
 
 export class ApiError extends Error {
@@ -123,6 +124,10 @@ export const api = {
     rawUrl: (projectId: string, path: string) =>
       `/api/projects/${projectId}/raw/${path.split('/').map(encodeURIComponent).join('/')}`,
     exportZipUrl: (projectId: string) => `/api/projects/${projectId}/export.zip`,
+  },
+
+  account: {
+    storage: () => requestJson<StorageUsage>('/api/account/storage'),
   },
 
   admin: {

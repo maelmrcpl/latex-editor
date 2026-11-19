@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, Check, Crown, Loader2, RotateCcw, X } from 'lucide-react';
 import type { AdminUserEntry, AuthUser, UserStatus } from '@prism-latex/shared';
 import { api, ApiError } from '../lib/api';
+import { formatBytes, quotaBarColor, quotaRatio } from '../lib/format';
 import { SynTeXLogo } from './SynTeXLogo';
 
 interface AdminPanelProps {
@@ -109,6 +110,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, onBack }) =
                   <th className="px-4 py-3 font-medium hidden md:table-cell">Inscription</th>
                   <th className="px-4 py-3 font-medium hidden md:table-cell">Dernière connexion</th>
                   <th className="px-4 py-3 font-medium hidden sm:table-cell">Projets</th>
+                  <th className="px-4 py-3 font-medium hidden sm:table-cell">Stockage</th>
                   <th className="px-4 py-3 font-medium text-right">Actions</th>
                 </tr>
               </thead>
@@ -160,6 +162,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, onBack }) =
                       <td className="px-4 py-3 text-xs text-zinc-400 hidden sm:table-cell">
                         {u.projectCount}
                       </td>
+                      <td className="px-4 py-3 text-xs text-zinc-400 hidden sm:table-cell">
+                        <UserStorageCell used={u.storageBytes} quota={u.quotaBytes} />
+                      </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-end gap-1.5">
                           {busy && <Loader2 className="w-3.5 h-3.5 animate-spin text-zinc-500" />}
@@ -203,6 +208,28 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, onBack }) =
           </div>
         )}
       </main>
+    </div>
+  );
+};
+
+const UserStorageCell: React.FC<{ used: number; quota: number | null }> = ({ used, quota }) => {
+  const ratio = quotaRatio(used, quota);
+  return (
+    <div className="min-w-[7.5rem]">
+      <div className="tabular-nums whitespace-nowrap">
+        {formatBytes(used)}
+        <span className="text-zinc-600">
+          {quota === null ? ' • sans limite' : ` / ${formatBytes(quota)}`}
+        </span>
+      </div>
+      {ratio !== null && (
+        <div className="mt-1 h-1 w-24 rounded-full bg-zinc-800 overflow-hidden">
+          <div
+            className={`h-full rounded-full ${quotaBarColor(ratio)}`}
+            style={{ width: `${Math.max(ratio * 100, used > 0 ? 2 : 0)}%` }}
+          />
+        </div>
+      )}
     </div>
   );
 };

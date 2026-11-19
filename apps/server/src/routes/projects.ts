@@ -14,7 +14,7 @@ import type {
   ProjectTemplateId,
 } from '@prism-latex/shared';
 import { config } from '../config.js';
-import { db } from '../db.js';
+import { db, getQuotaBytesForRole, getUserStorageBytes } from '../db.js';
 import type { AppVariables } from '../middleware/auth.js';
 import { requireApproved, requireAuth } from '../middleware/auth.js';
 import {
@@ -44,35 +44,24 @@ function formatMb(bytes: number): string {
   return `${Math.round(bytes / (1024 * 1024))} Mo`;
 }
 
-/** Espace disque utilisé par tous les projets d'un utilisateur (octets). */
-function getUserStorageBytes(userId: string): number {
-  const row = db
-    .prepare(
-      `SELECT COALESCE(SUM(f.size), 0) AS total
-       FROM project_files f JOIN projects p ON p.id = f.project_id
-       WHERE p.owner_id = ?`
-    )
-    .get(userId) as { total: number };
-  return Number(row.total) || 0;
-}
-
 /**
  * Vérifie que l'ajout de `deltaBytes` reste dans le quota du propriétaire du projet.
  * Le quota s'applique au propriétaire (pas à l'admin qui éditerait le projet d'un autre).
  * Retourne un message d'erreur, ou null si OK.
  */
 function checkQuota(projectId: string, deltaBytes: number): string | null {
-  if (config.userQuotaBytes <= 0 || deltaBytes <= 0) return null;
+  if (deltaBytes <= 0) return null;
   const owner = db
     .prepare(
       `SELECT u.id, u.role FROM projects p JOIN users u ON u.id = p.owner_id
        WHERE p.id = ? LIMIT 1`
     )
     .get(projectId) as { id: string; role: string } | undefined;
-  if (!owner || owner.role === 'admin') return null;
+  const quota = owner ? getQuotaBytesForRole(owner.role) : null;
+  if (!owner || quota === null) return null;
   const used = getUserStorageBytes(owner.id);
-  if (used + deltaBytes > config.userQuotaBytes) {
-    return `Quota de stockage dépassé (${formatMb(used)} utilisés sur ${formatMb(config.userQuotaBytes)}).`;
+  if (used + deltaBytes > quota) {
+    return `Quota de stockage dépassé (${formatMb(used)} utilisés sur ${formatMb(quota)}).`;
   }
   return null;
 }

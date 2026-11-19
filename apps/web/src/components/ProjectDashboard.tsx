@@ -5,6 +5,7 @@ import {
   Download,
   FileCode2,
   FolderPlus,
+  HardDrive,
   LogOut,
   Presentation,
   ScrollText,
@@ -17,8 +18,10 @@ import type {
   CompilerEngine,
   ProjectSummary,
   ProjectTemplateId,
+  StorageUsage,
 } from '@prism-latex/shared';
 import { api } from '../lib/api';
+import { formatBytes, quotaBarColor, quotaRatio } from '../lib/format';
 import { SynTeXLogo } from './SynTeXLogo';
 
 interface ProjectDashboardProps {
@@ -69,6 +72,7 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
   const isAdmin = user.role === 'admin';
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [loading, setLoading] = useState(true);
+  const [storage, setStorage] = useState<StorageUsage | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
 
   const [newName, setNewName] = useState('');
@@ -76,6 +80,13 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
   const [newTemplate, setNewTemplate] = useState<ProjectTemplateId>('article');
   const [newCompiler, setNewCompiler] = useState<CompilerEngine>('pdflatex');
   const [creating, setCreating] = useState(false);
+
+  const loadStorage = () => {
+    api.account
+      .storage()
+      .then(setStorage)
+      .catch(() => setStorage(null));
+  };
 
   const loadProjects = async () => {
     setLoading(true);
@@ -89,6 +100,7 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
 
   useEffect(() => {
     void loadProjects();
+    loadStorage();
   }, []);
 
   const handleCreate = async (e: React.FormEvent) => {
@@ -118,6 +130,7 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
     }
     await api.projects.delete(project.id);
     setProjects((prev) => prev.filter((p) => p.id !== project.id));
+    loadStorage();
   };
 
   const formatDate = (ts: number) =>
@@ -181,6 +194,7 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
             <p className="text-sm text-zinc-400 mt-1">
                Compilation WebAssembly côté client • Zéro charge CPU/RAM sur ton homelab
             </p>
+            {storage && <StorageMeter storage={storage} isAdmin={isAdmin} />}
           </div>
 
           <button
@@ -364,6 +378,53 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
           </div>
         </div>
       )}
+    </div>
+  );
+};
+
+/** Jauge d'espace disque de l'utilisateur connecté (quota USER_QUOTA_MB, limite MAX_UPLOAD_MB). */
+const StorageMeter: React.FC<{ storage: StorageUsage; isAdmin: boolean }> = ({
+  storage,
+  isAdmin,
+}) => {
+  const { usedBytes, quotaBytes, maxUploadBytes } = storage;
+  const ratio = quotaRatio(usedBytes, quotaBytes);
+  const over = quotaBytes !== null && usedBytes >= quotaBytes;
+
+  return (
+    <div className="mt-4 w-full max-w-sm" aria-label="Espace de stockage">
+      <div className="flex items-center justify-between gap-3 text-xs mb-1.5">
+        <span className="flex items-center gap-1.5 text-zinc-300">
+          <HardDrive className="w-3.5 h-3.5 text-zinc-500" />
+          {isAdmin ? 'Stockage de tes projets' : 'Stockage'}
+        </span>
+        <span className="text-zinc-400 tabular-nums">
+          {quotaBytes === null
+            ? `${formatBytes(usedBytes)} • sans limite`
+            : `${formatBytes(usedBytes)} / ${formatBytes(quotaBytes)}`}
+        </span>
+      </div>
+      {ratio !== null && (
+        <div
+          className="h-1.5 rounded-full bg-zinc-800 overflow-hidden"
+          role="progressbar"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round(ratio * 100)}
+        >
+          <div
+            className={`h-full rounded-full transition-all ${quotaBarColor(ratio)}`}
+            style={{ width: `${Math.max(ratio * 100, usedBytes > 0 ? 1 : 0)}%` }}
+          />
+        </div>
+      )}
+      <p className={`text-[11px] mt-1.5 ${over ? 'text-red-300' : 'text-zinc-500'}`}>
+        {over
+          ? 'Quota atteint : supprime des fichiers ou des projets pour en ajouter.'
+          : quotaBytes === null
+            ? `Fichiers jusqu'à ${formatBytes(maxUploadBytes)}`
+            : `${formatBytes(quotaBytes - usedBytes)} disponibles • fichiers jusqu'à ${formatBytes(maxUploadBytes)}`}
+      </p>
     </div>
   );
 };

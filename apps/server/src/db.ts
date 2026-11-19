@@ -96,3 +96,20 @@ export function claimOrphanProjects(adminUserId: string): void {
 export function purgeExpiredSessions(): void {
   db.prepare('DELETE FROM sessions WHERE expires_at <= ?').run(Date.now());
 }
+
+/** Espace disque occupé par tous les projets d'un utilisateur (octets). */
+export function getUserStorageBytes(userId: string): number {
+  const row = db
+    .prepare(
+      `SELECT COALESCE(SUM(f.size), 0) AS total
+       FROM project_files f JOIN projects p ON p.id = f.project_id
+       WHERE p.owner_id = ?`
+    )
+    .get(userId) as { total: number };
+  return Number(row.total) || 0;
+}
+
+/** Quota applicable à un rôle (octets), ou null si illimité (admins, ou USER_QUOTA_MB=0). */
+export function getQuotaBytesForRole(role: string): number | null {
+  return role === 'admin' || config.userQuotaBytes <= 0 ? null : config.userQuotaBytes;
+}

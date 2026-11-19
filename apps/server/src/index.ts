@@ -10,6 +10,7 @@ import {
   isHttpsRequest,
   syncAdminRolesWithConfig,
 } from './middleware/auth.js';
+import { accountRoutes } from './routes/account.js';
 import { adminRoutes } from './routes/admin.js';
 import { authRoutes } from './routes/auth.js';
 import { citationRoutes } from './routes/citations.js';
@@ -129,6 +130,7 @@ app.get('/api/busytex/manifest', (c) => {
 });
 
 app.route('/api/auth', authRoutes);
+app.route('/api/account', accountRoutes);
 app.route('/api/admin', adminRoutes);
 app.route('/api/projects', projectRoutes);
 app.route('/api/citations', citationRoutes);

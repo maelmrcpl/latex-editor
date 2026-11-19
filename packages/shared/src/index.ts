@@ -20,6 +20,19 @@ export interface AdminUserEntry extends AuthUser {
   lastLoginAt: number | null;
   reviewedAt: number | null;
   projectCount: number;
+  /** Espace occupé par les projets de l'utilisateur (octets) */
+  storageBytes: number;
+  /** Quota applicable (octets), null = illimité (admins ou USER_QUOTA_MB=0) */
+  quotaBytes: number | null;
+}
+
+/** Stockage de l'utilisateur connecté (GET /api/account/storage) */
+export interface StorageUsage {
+  usedBytes: number;
+  /** null = illimité (admins ou USER_QUOTA_MB=0) */
+  quotaBytes: number | null;
+  /** Taille max d'un fichier déposé */
+  maxUploadBytes: number;
 }
 
 export interface ProjectOwner {

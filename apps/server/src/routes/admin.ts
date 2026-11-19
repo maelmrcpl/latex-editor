@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { AdminUserEntry, UserStatus } from '@prism-latex/shared';
-import { db } from '../db.js';
+import { db, getQuotaBytesForRole } from '../db.js';
 import {
   type AppVariables,
   type DbUserRow,
@@ -11,13 +11,24 @@ import {
 
 const VALID_STATUSES = new Set<UserStatus>(['pending', 'approved', 'rejected']);
 
-function mapAdminUser(row: DbUserRow & { project_count: number }): AdminUserEntry {
+type AdminUserRow = DbUserRow & { project_count: number; storage_bytes: number };
+
+/** Colonnes calculées : nombre de projets et espace occupé par utilisateur */
+const USER_STATS_COLUMNS = `
+  (SELECT COUNT(*) FROM projects p WHERE p.owner_id = u.id) AS project_count,
+  (SELECT COALESCE(SUM(f.size), 0)
+     FROM project_files f JOIN projects p ON p.id = f.project_id
+     WHERE p.owner_id = u.id) AS storage_bytes`;
+
+function mapAdminUser(row: AdminUserRow): AdminUserEntry {
   return {
     ...mapAuthUser(row),
     createdAt: row.created_at,
     lastLoginAt: row.last_login_at,
     reviewedAt: row.reviewed_at,
-    projectCount: row.project_count ?? 0,
+    projectCount: Number(row.project_count) || 0,
+    storageBytes: Number(row.storage_bytes) || 0,
+    quotaBytes: getQuotaBytesForRole(row.role),
   };
 }
 
@@ -28,14 +39,12 @@ adminRoutes.use('*', requireAuth, requireAdmin);
 adminRoutes.get('/users', (c) => {
   const rows = db
     .prepare(
-      `SELECT u.*, COUNT(p.id) AS project_count
+      `SELECT u.*, ${USER_STATS_COLUMNS}
        FROM users u
-       LEFT JOIN projects p ON p.owner_id = u.id
-       GROUP BY u.id
        ORDER BY CASE u.status WHEN 'pending' THEN 0 WHEN 'approved' THEN 1 ELSE 2 END,
                 u.created_at DESC`
     )
-    .all() as unknown as Array<DbUserRow & { project_count: number }>;
+    .all() as unknown as AdminUserRow[];
 
   return c.json({ users: rows.map(mapAdminUser) });
 });
@@ -71,10 +80,10 @@ adminRoutes.patch('/users/:id', async (c) => {
 
   const updated = db
     .prepare(
-      `SELECT u.*, (SELECT COUNT(*) FROM projects p WHERE p.owner_id = u.id) AS project_count
+      `SELECT u.*, ${USER_STATS_COLUMNS}
        FROM users u WHERE u.id = ? LIMIT 1`
     )
-    .get(targetId) as unknown as DbUserRow & { project_count: number };
+    .get(targetId) as unknown as AdminUserRow;
 
   console.log(`[admin] ${admin.email} : ${target.email} -> ${status}`);
   return c.json({ user: mapAdminUser(updated) });
