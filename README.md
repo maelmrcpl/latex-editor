@@ -43,9 +43,8 @@ npm run setup:wasm
 # 3. Configurer la connexion Google (GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / ADMIN_EMAILS)
 cp .env.example .env
 
-# 4. Lancer le backend (port 3000) et le frontend Vite (port 5173) dans deux terminaux :
-npm run dev:server
-npm run dev:web
+# 4. Lancer le backend (port 3000) et le frontend Vite (port 5173) :
+npm run dev
 ```
 
 Ouvre ensuite `http://localhost:5173`.
@@ -61,33 +60,6 @@ Les emails listés dans `ADMIN_EMAILS` sont admins et validés automatiquement. 
 Limites de stockage (réglables dans `.env`) : `MAX_UPLOAD_MB` (taille max d'un fichier déposé, 25 Mo par défaut) et `USER_QUOTA_MB` (espace total des projets d'un utilisateur, 500 Mo par défaut, `0` = illimité, les admins ne sont pas concernés). Les sauvegardes depuis l'éditeur sont limitées à 5 Mo par fichier.
 
 > Migration depuis la version mono-compte : les anciennes sessions sont invalidées et les projets existants sont rattachés au premier administrateur qui se connecte.
-
----
-
-## Déploiement Homelab : Conteneur LXC Proxmox + FortiGate
-
-### 1. Création du conteneur LXC sur ton NUC Proxmox
-- **Template** : Debian 12 ou Ubuntu 24.04 (unprivileged container)
-- **Ressources recommandées** : 1 vCPU, **512 Mo à 1 Go de RAM** (largement suffisant, le process Node utilise < 100 Mo), 4–8 Go de disque.
-
-### 2. Installation automatique dans le LXC
-Clone ce dépôt dans le conteneur LXC puis exécute :
-
-```bash
-chmod +x deploy/lxc/install-lxc.sh
-sudo ./deploy/lxc/install-lxc.sh
-```
-
-Le script installe Node 24, télécharge les assets WASM BusyTeX (pour qu'ils soient hébergés localement par ton LXC sans dépendre d'Internet par la suite), compile le frontend + backend, te demande l'URL publique, les identifiants OAuth Google et les emails administrateurs (stockés dans `/etc/prism-latex/prism-latex.env`, `chmod 600`) et démarre le service `systemd` `prism-latex.service` sur le port `3000`.
-
-### 3. Configuration Reverse-Proxy FortiGate
-- Redirige le flux HTTPS externe vers `http://<IP_DU_LXC>:3000`.
-- Active l'injection des en-têtes HTTP standards sur le Virtual Server / Web Proxy FortiGate :
-  - `X-Forwarded-For` (IP client enregistrée sur les sessions grâce à `TRUST_PROXY=true`)
-  - `X-Forwarded-Proto: https` (active automatiquement l'attribut `Secure` sur le cookie de session `HttpOnly` et l'en-tête HSTS)
-- Renseigne l'IP du FortiGate (telle que vue par le LXC) dans `TRUSTED_PROXY_IPS` : les en-têtes `X-Forwarded-*` venant de toute autre IP sont ignorés, ce qui empêche de les falsifier en joignant directement le port `3000`. Idéalement, n'autorise aussi le port `3000` que depuis le FortiGate (pare-feu Proxmox).
-
-Le script vérifie l'intégrité des assets BusyTeX téléchargés grâce aux empreintes SHA-256 de `deploy/busytex-assets.sha256`. Après une mise à jour volontaire de `texlyre-busytex`, régénère ce fichier avec `node scripts/verify-busytex.mjs --write` et commite-le.
 
 ---
 
