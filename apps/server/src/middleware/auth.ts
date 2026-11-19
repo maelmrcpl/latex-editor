@@ -120,10 +120,43 @@ export const requireAuth: MiddlewareHandler<{ Variables: AppVariables }> = async
     return c.json({ error: 'Session expirée ou invalide.' }, 401);
   }
 
+  // ADMIN_EMAILS (.env) est la source de vérité du rôle admin, appliquée à chaque requête :
+  // retirer un email de la liste rétrograde immédiatement ses sessions en cours.
+  const shouldBeAdmin = config.adminEmails.includes(row.email.toLowerCase());
+  if (shouldBeAdmin !== (row.role === 'admin')) {
+    row.role = shouldBeAdmin ? 'admin' : 'user';
+    if (shouldBeAdmin) row.status = 'approved';
+    db.prepare('UPDATE users SET role = ?, status = ?, updated_at = ? WHERE id = ?').run(
+      row.role,
+      row.status,
+      Date.now(),
+      row.id
+    );
+    console.log(`[auth] Rôle de ${row.email} synchronisé avec ADMIN_EMAILS -> ${row.role}`);
+  }
+
   c.set('user', mapAuthUser(row));
   c.set('sessionId', row.session_id);
   return next();
 };
+
+/**
+ * Au démarrage : rétrograde les comptes admin dont l'email n'est plus dans ADMIN_EMAILS
+ * (pour que le panneau Utilisateurs reflète la config, même sans requête de leur part).
+ */
+export function syncAdminRolesWithConfig(): void {
+  const admins = db.prepare("SELECT id, email FROM users WHERE role = 'admin'").all() as Array<{
+    id: string;
+    email: string;
+  }>;
+  const demote = db.prepare("UPDATE users SET role = 'user', updated_at = ? WHERE id = ?");
+  for (const admin of admins) {
+    if (!config.adminEmails.includes(admin.email.toLowerCase())) {
+      demote.run(Date.now(), admin.id);
+      console.log(`[auth] ${admin.email} n'est plus dans ADMIN_EMAILS : rôle admin retiré.`);
+    }
+  }
+}
 
 /** Must run after requireAuth. Blocks accounts not (yet) validated by an admin. */
 export const requireApproved: MiddlewareHandler<{ Variables: AppVariables }> = async (c, next) => {

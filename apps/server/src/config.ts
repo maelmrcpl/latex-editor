@@ -22,6 +22,12 @@ function parseList(raw: string | undefined): string[] {
     .filter(Boolean);
 }
 
+function parsePositiveMb(raw: string | undefined, fallbackMb: number, allowZero = false): number {
+  const value = Number.parseInt((raw ?? '').trim(), 10);
+  const mb = Number.isFinite(value) && (value > 0 || (allowZero && value === 0)) ? value : fallbackMb;
+  return mb * 1024 * 1024;
+}
+
 const googleClientId = (process.env.GOOGLE_CLIENT_ID ?? '').trim();
 const googleClientSecret = (process.env.GOOGLE_CLIENT_SECRET ?? '').trim();
 const adminEmails = parseList(process.env.ADMIN_EMAILS);
@@ -74,6 +80,10 @@ export const config = {
   },
   adminEmails,
   allowedEmailDomains,
+  /** Taille max d'un fichier déposé (MAX_UPLOAD_MB, défaut 25 Mo) */
+  maxUploadBytes: parsePositiveMb(process.env.MAX_UPLOAD_MB, 25),
+  /** Quota disque par utilisateur, admins exemptés (USER_QUOTA_MB, défaut 500 Mo, 0 = illimité) */
+  userQuotaBytes: parsePositiveMb(process.env.USER_QUOTA_MB, 500, true),
   sessionTtlMs: (Number.parseInt(process.env.SESSION_TTL_HOURS ?? '168', 10) || 168) * 3600 * 1000,
   trustProxy: (process.env.TRUST_PROXY ?? 'true').toLowerCase() === 'true',
   forceSecureCookie: (process.env.FORCE_SECURE_COOKIE ?? 'false').toLowerCase() === 'true',

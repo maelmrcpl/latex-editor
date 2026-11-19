@@ -95,16 +95,20 @@ export const api = {
         method: 'PUT',
         body: JSON.stringify({ path, content }),
       }),
-    uploadFiles: (projectId: string, files: FileList | File[], folder = '') => {
-      const form = new FormData();
-      if (folder) form.set('folder', folder);
+    /** Un fichier par requête : le serveur limite la taille de chaque requête d'upload. */
+    uploadFiles: async (projectId: string, files: FileList | File[], folder = '') => {
+      const uploaded: ProjectFileEntry[] = [];
       for (const f of Array.from(files)) {
+        const form = new FormData();
+        if (folder) form.set('folder', folder);
         form.append('files', f);
+        const res = await requestJson<{ files: ProjectFileEntry[] }>(
+          `/api/projects/${projectId}/upload`,
+          { method: 'POST', body: form }
+        );
+        uploaded.push(...res.files);
       }
-      return requestJson<{ files: ProjectFileEntry[] }>(`/api/projects/${projectId}/upload`, {
-        method: 'POST',
-        body: form,
-      });
+      return { files: uploaded };
     },
     renamePath: (projectId: string, oldPath: string, newPath: string) =>
       requestJson<{ ok: boolean; rootFile: string }>(`/api/projects/${projectId}/rename`, {

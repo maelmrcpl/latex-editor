@@ -3,6 +3,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { MiddlewareHandler } from 'hono';
 import { Hono } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
 import { zipSync } from 'fflate';
 import type {
   CompilerEngine,
@@ -12,6 +13,7 @@ import type {
   ProjectSummary,
   ProjectTemplateId,
 } from '@prism-latex/shared';
+import { config } from '../config.js';
 import { db } from '../db.js';
 import type { AppVariables } from '../middleware/auth.js';
 import { requireApproved, requireAuth } from '../middleware/auth.js';
@@ -28,7 +30,65 @@ import { getTemplateFiles } from '../templates.js';
 
 const VALID_COMPILERS = new Set<CompilerEngine>(['pdflatex', 'xelatex', 'lualatex']);
 const VALID_TEMPLATES = new Set<ProjectTemplateId>(['article', 'report-fr', 'beamer', 'blank']);
-const MAX_UPLOAD_BYTES = 25 * 1024 * 1024; // 25 MB per file
+/** Types servis inline par /raw (images matricielles, sans script possible). Le reste : attachment. */
+const INLINE_RAW_MIME = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+const MAX_JSON_BODY_BYTES = 5 * 1024 * 1024; // sauvegarde d'un fichier texte depuis l'éditeur
+const MULTIPART_OVERHEAD_BYTES = 1024 * 1024;
+
+function formatMb(bytes: number): string {
+  return `${Math.round(bytes / (1024 * 1024))} Mo`;
+}
+
+/** Espace disque utilisé par tous les projets d'un utilisateur (octets). */
+function getUserStorageBytes(userId: string): number {
+  const row = db
+    .prepare(
+      `SELECT COALESCE(SUM(f.size), 0) AS total
+       FROM project_files f JOIN projects p ON p.id = f.project_id
+       WHERE p.owner_id = ?`
+    )
+    .get(userId) as { total: number };
+  return Number(row.total) || 0;
+}
+
+/**
+ * Vérifie que l'ajout de `deltaBytes` reste dans le quota du propriétaire du projet.
+ * Le quota s'applique au propriétaire (pas à l'admin qui éditerait le projet d'un autre).
+ * Retourne un message d'erreur, ou null si OK.
+ */
+function checkQuota(projectId: string, deltaBytes: number): string | null {
+  if (config.userQuotaBytes <= 0 || deltaBytes <= 0) return null;
+  const owner = db
+    .prepare(
+      `SELECT u.id, u.role FROM projects p JOIN users u ON u.id = p.owner_id
+       WHERE p.id = ? LIMIT 1`
+    )
+    .get(projectId) as { id: string; role: string } | undefined;
+  if (!owner || owner.role === 'admin') return null;
+  const used = getUserStorageBytes(owner.id);
+  if (used + deltaBytes > config.userQuotaBytes) {
+    return `Quota de stockage dépassé (${formatMb(used)} utilisés sur ${formatMb(config.userQuotaBytes)}).`;
+  }
+  return null;
+}
+
+function existingFileSize(projectId: string, cleanPath: string): number {
+  const row = db
+    .prepare('SELECT size FROM project_files WHERE project_id = ? AND path = ? LIMIT 1')
+    .get(projectId, cleanPath) as { size: number } | undefined;
+  return row?.size ?? 0;
+}
+
+const jsonBodyLimit = bodyLimit({
+  maxSize: MAX_JSON_BODY_BYTES,
+  onError: (c) => c.json({ error: `Requête trop volumineuse (max ${formatMb(MAX_JSON_BODY_BYTES)}).` }, 413),
+});
+
+const uploadBodyLimit = bodyLimit({
+  maxSize: config.maxUploadBytes + MULTIPART_OVERHEAD_BYTES,
+  onError: (c) =>
+    c.json({ error: `Fichier trop volumineux (max ${formatMb(config.maxUploadBytes)} par fichier).` }, 413),
+});
 
 interface DbProjectRow {
   id: string;
@@ -111,7 +171,7 @@ projectRoutes.get('/', (c) => {
 });
 
 // Create a new project from template
-projectRoutes.post('/', async (c) => {
+projectRoutes.post('/', jsonBodyLimit, async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const name = typeof body.name === 'string' ? body.name.trim().slice(0, 120) : '';
   const description =
@@ -261,7 +321,7 @@ projectRoutes.get('/:id/bundle', (c) => {
 });
 
 // Update project metadata (name, description, rootFile, compiler)
-projectRoutes.patch('/:id', async (c) => {
+projectRoutes.patch('/:id', jsonBodyLimit, async (c) => {
   const projectId = c.req.param('id');
   const existing = db
     .prepare(
@@ -327,7 +387,7 @@ projectRoutes.delete('/:id', (c) => {
 });
 
 // Create or update a text file
-projectRoutes.put('/:id/files', async (c) => {
+projectRoutes.put('/:id/files', jsonBodyLimit, async (c) => {
   const projectId = c.req.param('id');
   const projectExists = db.prepare('SELECT id FROM projects WHERE id = ? LIMIT 1').get(projectId);
   if (!projectExists) {
@@ -343,6 +403,13 @@ projectRoutes.put('/:id/files', async (c) => {
   }
 
   const content = typeof body.content === 'string' ? body.content : '';
+  const quotaError = checkQuota(
+    projectId,
+    Buffer.byteLength(content, 'utf8') - existingFileSize(projectId, cleanPath)
+  );
+  if (quotaError) {
+    return c.json({ error: quotaError }, 413);
+  }
   const size = writeProjectFileDisk(projectId, cleanPath, content);
   const meta = detectFileMetadata(cleanPath);
   const now = Date.now();
@@ -382,7 +449,7 @@ projectRoutes.put('/:id/files', async (c) => {
 });
 
 // Upload binary or text files (images, PDFs, .bib, .sty, etc.)
-projectRoutes.post('/:id/upload', async (c) => {
+projectRoutes.post('/:id/upload', uploadBodyLimit, async (c) => {
   const projectId = c.req.param('id');
   const projectExists = db.prepare('SELECT id FROM projects WHERE id = ? LIMIT 1').get(projectId);
   if (!projectExists) {
@@ -391,10 +458,14 @@ projectRoutes.post('/:id/upload', async (c) => {
 
   const formData = await c.req.formData();
   const folderRaw = formData.get('folder');
-  const folderPrefix =
-    typeof folderRaw === 'string' && folderRaw.trim()
-      ? `${normalizeProjectPath(folderRaw)}/`
-      : '';
+  let folderPrefix = '';
+  try {
+    if (typeof folderRaw === 'string' && folderRaw.trim()) {
+      folderPrefix = `${normalizeProjectPath(folderRaw)}/`;
+    }
+  } catch (err) {
+    return c.json({ error: (err as Error).message }, 400);
+  }
 
   const uploaded: ProjectFileEntry[] = [];
   const items = formData.getAll('files');
@@ -402,8 +473,13 @@ projectRoutes.post('/:id/upload', async (c) => {
 
   for (const item of items) {
     if (!(item instanceof File)) continue;
-    if (item.size > MAX_UPLOAD_BYTES) {
-      return c.json({ error: `Le fichier "${item.name}" dépasse la limite de 25 Mo.` }, 413);
+    if (item.size > config.maxUploadBytes) {
+      return c.json(
+        {
+          error: `Le fichier "${item.name}" dépasse la limite de ${formatMb(config.maxUploadBytes)}.`,
+        },
+        413
+      );
     }
 
     let cleanPath: string;
@@ -411,6 +487,11 @@ projectRoutes.post('/:id/upload', async (c) => {
       cleanPath = normalizeProjectPath(`${folderPrefix}${item.name}`);
     } catch (err) {
       return c.json({ error: (err as Error).message }, 400);
+    }
+
+    const quotaError = checkQuota(projectId, item.size - existingFileSize(projectId, cleanPath));
+    if (quotaError) {
+      return c.json({ error: quotaError }, 413);
     }
 
     const buf = Buffer.from(await item.arrayBuffer());
@@ -452,7 +533,7 @@ projectRoutes.post('/:id/upload', async (c) => {
 });
 
 // Rename a file or folder
-projectRoutes.post('/:id/rename', async (c) => {
+projectRoutes.post('/:id/rename', jsonBodyLimit, async (c) => {
   const projectId = c.req.param('id');
   const projectRow = db
     .prepare('SELECT id, root_file FROM projects WHERE id = ? LIMIT 1')
@@ -545,11 +626,10 @@ projectRoutes.delete('/:id/files', (c) => {
 projectRoutes.get('/:id/raw/*', (c) => {
   const projectId = c.req.param('id');
   const prefix = `/api/projects/${projectId}/raw/`;
-  const reqPath = decodeURIComponent(new URL(c.req.url).pathname);
-  const relRaw = reqPath.startsWith(prefix) ? reqPath.slice(prefix.length) : '';
-
   let cleanPath: string;
   try {
+    const reqPath = decodeURIComponent(new URL(c.req.url).pathname);
+    const relRaw = reqPath.startsWith(prefix) ? reqPath.slice(prefix.length) : '';
     cleanPath = normalizeProjectPath(relRaw);
   } catch {
     return c.json({ error: 'Chemin invalide.' }, 400);
@@ -565,12 +645,19 @@ projectRoutes.get('/:id/raw/*', (c) => {
 
   try {
     const buf = readProjectFileDisk(projectId, cleanPath);
-    return new Response(new Uint8Array(buf), {
-      headers: {
-        'Content-Type': fileRow.mime_type,
-        'Cache-Control': 'no-cache',
-      },
-    });
+    // Fichiers déposés par les utilisateurs : jamais exécutés dans l'origine de l'app.
+    // Un SVG/HTML ouvert directement (lien envoyé à un admin) ne peut lancer aucun script,
+    // et seules les images matricielles sont affichées inline.
+    const headers: Record<string, string> = {
+      'Content-Type': fileRow.mime_type,
+      'Cache-Control': 'no-cache',
+      'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+    };
+    if (!INLINE_RAW_MIME.has(fileRow.mime_type)) {
+      const asciiName = path.posix.basename(cleanPath).replace(/[^\w.-]+/g, '_') || 'fichier';
+      headers['Content-Disposition'] = `attachment; filename="${asciiName}"`;
+    }
+    return new Response(new Uint8Array(buf), { headers });
   } catch {
     return c.json({ error: 'Impossible de lire le fichier.' }, 404);
   }

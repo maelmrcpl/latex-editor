@@ -56,7 +56,9 @@ Ouvre ensuite `http://localhost:5173`.
 2. **URI de redirection autorisés** : `<PUBLIC_URL>/api/auth/google/callback` — par ex. `http://localhost:5173/api/auth/google/callback` en dev et `https://latex.mondomaine.fr/api/auth/google/callback` en prod.
 3. Renseigne `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `PUBLIC_URL` et `ADMIN_EMAILS` dans `.env`.
 
-Les emails listés dans `ADMIN_EMAILS` sont admins et validés automatiquement. Les autres comptes apparaissent **En attente** dans le panneau **Utilisateurs** (bouton visible par les admins sur le tableau de bord), où tu peux les valider, les refuser ou révoquer leur accès.
+Les emails listés dans `ADMIN_EMAILS` sont admins et validés automatiquement. Les autres comptes apparaissent **En attente** dans le panneau **Utilisateurs** (bouton visible par les admins sur le tableau de bord), où tu peux les valider, les refuser ou révoquer leur accès. Le rôle admin est vérifié contre `ADMIN_EMAILS` à chaque requête : retirer un email de la liste (puis redémarrer le service) lui retire immédiatement le rôle admin, sessions en cours comprises. Le compte reste validé en tant qu'utilisateur ; refuse-le dans le panneau pour lui couper l'accès.
+
+Limites de stockage (réglables dans `.env`) : `MAX_UPLOAD_MB` (taille max d'un fichier déposé, 25 Mo par défaut) et `USER_QUOTA_MB` (espace total des projets d'un utilisateur, 500 Mo par défaut, `0` = illimité, les admins ne sont pas concernés). Les sauvegardes depuis l'éditeur sont limitées à 5 Mo par fichier.
 
 > Migration depuis la version mono-compte : les anciennes sessions sont invalidées et les projets existants sont rattachés au premier administrateur qui se connecte.
 

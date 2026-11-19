@@ -4,7 +4,7 @@ import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import { config } from './config.js';
 import { purgeExpiredSessions } from './db.js';
-import { type AppVariables, csrfMiddleware } from './middleware/auth.js';
+import { type AppVariables, csrfMiddleware, syncAdminRolesWithConfig } from './middleware/auth.js';
 import { adminRoutes } from './routes/admin.js';
 import { authRoutes } from './routes/auth.js';
 import { citationRoutes } from './routes/citations.js';
@@ -153,6 +153,8 @@ app.get('*', (c) => {
 
   return c.notFound();
 });
+
+syncAdminRolesWithConfig();
 
 // Periodic session cleanup every hour
 setInterval(() => {
