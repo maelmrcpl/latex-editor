@@ -189,6 +189,8 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
     try {
       const res = await api.citations.search(citeQuery.trim(), citeSource);
       setCiteResults(res.results);
+    } catch {
+      setCiteResults([]);
     } finally {
       setCiteLoading(false);
     }
@@ -513,7 +515,11 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
                   <div className="pt-1 flex items-center justify-between gap-1">
                     <button
                       onClick={async () => {
-                        await onInsertCitation(item);
+                        try {
+                          await onInsertCitation(item);
+                        } catch {
+                          return; // erreur affichée dans le bandeau de l'éditeur
+                        }
                         setInsertedId(item.id);
                         setTimeout(() => setInsertedId(null), 1600);
                       }}

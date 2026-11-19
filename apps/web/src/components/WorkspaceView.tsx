@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  AlertTriangle,
   ArrowLeft,
   ArrowRightLeft,
   CheckCircle2,
@@ -9,6 +10,7 @@ import {
   PanelLeftOpen,
   Play,
   Save,
+  X,
 } from 'lucide-react';
 import type {
   CitationResult,
@@ -19,7 +21,7 @@ import type {
   ProjectFileEntry,
   SyncTeXForwardResult,
 } from '@prism-latex/shared';
-import { api } from '../lib/api';
+import { api, ApiError } from '../lib/api';
 import { latexCompiler, type WasmStatus } from '../lib/latexCompiler';
 import { SyncTeXMapper } from '../lib/synctex';
 import { CodeMirrorPane, type CodeMirrorHandle } from './CodeMirrorPane';
@@ -39,6 +41,10 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ projectId, onBack 
   const [activePath, setActivePath] = useState<string>('main.tex');
   const [dirtyPaths, setDirtyPaths] = useState<Set<string>>(new Set());
   const [saving, setSaving] = useState(false);
+  /** Dernière sauvegarde en échec (quota atteint, serveur injoignable...) */
+  const [saveFailed, setSaveFailed] = useState(false);
+  /** Message d'erreur affiché dans le bandeau de l'éditeur */
+  const [actionError, setActionError] = useState<string | null>(null);
 
   // Layout state
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -103,28 +109,79 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ projectId, onBack 
     }
   }, [activePath]);
 
-  // Flush all dirty text files to the backend
-  const flushDirtyFiles = useCallback(async () => {
+  const reportError = useCallback((err: unknown, context: string) => {
+    const detail =
+      err instanceof ApiError
+        ? err.message
+        : 'serveur injoignable, vérifie ta connexion.';
+    setActionError(`${context} : ${detail}`);
+  }, []);
+
+  /**
+   * Sauvegarde les fichiers texte modifiés. Ne lève jamais d'erreur : en cas d'échec
+   * (quota atteint, réseau...), le fichier reste « modifié », le bandeau affiche la raison
+   * et la fonction renvoie false. Le contenu reste dans l'éditeur et la compilation continue.
+   */
+  const flushDirtyFiles = useCallback(async (): Promise<boolean> => {
     const dirtyList = Array.from(dirtyLatestRef.current);
-    if (dirtyList.length === 0) return;
+    if (dirtyList.length === 0) return true;
 
     setSaving(true);
+    const saved = new Map<string, string | null>(); // null = rien à envoyer
+    let failure: unknown = null;
     try {
       for (const path of dirtyList) {
         const entry = filesLatestRef.current.find((f) => f.path === path);
-        if (entry && !entry.isBinary && entry.content !== undefined) {
-          await api.projects.saveFile(projectId, path, entry.content);
+        if (!entry || entry.isBinary || entry.content === undefined) {
+          saved.set(path, null);
+          continue;
+        }
+        const content = entry.content;
+        try {
+          await api.projects.saveFile(projectId, path, content);
+          saved.set(path, content);
+        } catch (err) {
+          failure = err;
+          break;
         }
       }
-      setDirtyPaths((prev) => {
-        const next = new Set(prev);
-        for (const p of dirtyList) next.delete(p);
-        return next;
-      });
     } finally {
       setSaving(false);
     }
-  }, [projectId]);
+
+    // Un fichier n'est « propre » que si son contenu n'a pas changé pendant la sauvegarde
+    // Même référence si rien n'a changé : sinon l'autosave se relancerait en boucle après un échec
+    setDirtyPaths((prev) => {
+      const next = new Set(prev);
+      for (const [path, content] of saved) {
+        const current = filesLatestRef.current.find((f) => f.path === path);
+        if (content === null || !current || current.isBinary || current.content === content) {
+          next.delete(path);
+        }
+      }
+      return next.size === prev.size ? prev : next;
+    });
+
+    if (failure) {
+      setSaveFailed(true);
+      reportError(failure, 'Sauvegarde impossible (tes modifications restent dans l\'éditeur)');
+      return false;
+    }
+    setSaveFailed(false);
+    setActionError((prev) => (prev?.startsWith('Sauvegarde impossible') ? null : prev));
+    return true;
+  }, [projectId, reportError]);
+
+  // Prévient avant de quitter la page avec des modifications non sauvegardées
+  useEffect(() => {
+    if (dirtyPaths.size === 0) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [dirtyPaths]);
 
   // Debounced background auto-save (1.2s after typing stops)
   useEffect(() => {
@@ -192,10 +249,12 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ projectId, onBack 
           console.warn('[SyncTeX] Parse warning:', err);
         }
       }
+    } catch (err) {
+      reportError(err, 'Compilation impossible');
     } finally {
       setCompiling(false);
     }
-  }, [compiling, flushDirtyFiles, project, projectId]);
+  }, [compiling, flushDirtyFiles, project, projectId, reportError]);
 
   // Initial compile once project loads
   const didInitialCompileRef = useRef(false);
@@ -257,42 +316,70 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ projectId, onBack 
   };
 
   const handleCreateFile = async (rawPath: string) => {
-    const res = await api.projects.saveFile(projectId, rawPath, '');
-    setFiles((prev) => {
-      const filtered = prev.filter((f) => f.path !== res.file.path);
-      return [...filtered, res.file].sort((a, b) => a.path.localeCompare(b.path));
-    });
-    setActivePath(res.file.path);
+    try {
+      const res = await api.projects.saveFile(projectId, rawPath, '');
+      setFiles((prev) => {
+        const filtered = prev.filter((f) => f.path !== res.file.path);
+        return [...filtered, res.file].sort((a, b) => a.path.localeCompare(b.path));
+      });
+      setActivePath(res.file.path);
+    } catch (err) {
+      reportError(err, 'Création du fichier impossible');
+    }
   };
 
+  // Un fichier par requête : ceux déjà envoyés apparaissent même si un suivant est refusé
   const handleUploadFiles = async (fileList: FileList) => {
-    const res = await api.projects.uploadFiles(projectId, fileList);
-    setFiles((prev) => {
-      const byPath = new Map(prev.map((f) => [f.path, f]));
-      for (const up of res.files) {
-        byPath.set(up.path, up);
+    for (const file of Array.from(fileList)) {
+      try {
+        const res = await api.projects.uploadFiles(projectId, [file]);
+        setFiles((prev) => {
+          const byPath = new Map(prev.map((f) => [f.path, f]));
+          for (const up of res.files) {
+            byPath.set(up.path, up);
+          }
+          return Array.from(byPath.values()).sort((a, b) => a.path.localeCompare(b.path));
+        });
+      } catch (err) {
+        reportError(err, `Envoi de « ${file.name} » impossible`);
+        return;
       }
-      return Array.from(byPath.values()).sort((a, b) => a.path.localeCompare(b.path));
-    });
+    }
   };
 
   const handleRenamePath = async (oldPath: string, newPath: string) => {
-    await flushDirtyFiles();
-    const res = await api.projects.renamePath(projectId, oldPath, newPath);
-    const refreshed = await api.projects.get(projectId);
-    setProject(refreshed.project);
-    setFiles(refreshed.project.files);
-    if (activePath === oldPath) {
-      setActivePath(newPath);
-    } else if (activePath.startsWith(`${oldPath}/`)) {
-      setActivePath(`${newPath}${activePath.slice(oldPath.length)}`);
-    } else if (res.rootFile && !refreshed.project.files.some((f) => f.path === activePath)) {
-      setActivePath(res.rootFile);
+    // Le renommage recharge les fichiers depuis le serveur : on ne perd pas de modifications non sauvegardées
+    if (!(await flushDirtyFiles())) return;
+    try {
+      const res = await api.projects.renamePath(projectId, oldPath, newPath);
+      const refreshed = await api.projects.get(projectId);
+      setProject(refreshed.project);
+      setFiles(refreshed.project.files);
+      if (activePath === oldPath) {
+        setActivePath(newPath);
+      } else if (activePath.startsWith(`${oldPath}/`)) {
+        setActivePath(`${newPath}${activePath.slice(oldPath.length)}`);
+      } else if (res.rootFile && !refreshed.project.files.some((f) => f.path === activePath)) {
+        setActivePath(res.rootFile);
+      }
+    } catch (err) {
+      reportError(err, 'Renommage impossible');
     }
   };
 
   const handleDeletePath = async (targetPath: string) => {
-    await api.projects.deletePath(projectId, targetPath);
+    try {
+      await api.projects.deletePath(projectId, targetPath);
+    } catch (err) {
+      reportError(err, 'Suppression impossible');
+      return;
+    }
+    setDirtyPaths((prev) => {
+      const next = new Set(
+        [...prev].filter((p) => p !== targetPath && !p.startsWith(`${targetPath}/`))
+      );
+      return next.size === prev.size ? prev : next;
+    });
     setFiles((prev) => {
       const remaining = prev.filter(
         (f) => f.path !== targetPath && !f.path.startsWith(`${targetPath}/`)
@@ -306,14 +393,22 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ projectId, onBack 
 
   const handleSetRootFile = async (newRoot: string) => {
     if (!project) return;
-    await api.projects.update(projectId, { rootFile: newRoot });
-    setProject({ ...project, rootFile: newRoot });
+    try {
+      await api.projects.update(projectId, { rootFile: newRoot });
+      setProject({ ...project, rootFile: newRoot });
+    } catch (err) {
+      reportError(err, 'Changement du fichier principal impossible');
+    }
   };
 
   const handleChangeCompiler = async (compiler: CompilerEngine) => {
     if (!project) return;
-    await api.projects.update(projectId, { compiler });
-    setProject({ ...project, compiler });
+    try {
+      await api.projects.update(projectId, { compiler });
+      setProject({ ...project, compiler });
+    } catch (err) {
+      reportError(err, 'Changement de moteur impossible');
+    }
   };
 
   // Insert BibTeX entry into references.bib and insert \cite{key} in active .tex editor
@@ -333,7 +428,13 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ projectId, onBack 
     const currentBib = bibFile.content ?? '';
     if (!currentBib.includes(citation.citeKey)) {
       const nextBib = `${currentBib.trimEnd()}\n\n${citation.bibtex}\n`.trimStart();
-      const saved = await api.projects.saveFile(projectId, bibFile.path, nextBib);
+      let saved: Awaited<ReturnType<typeof api.projects.saveFile>>;
+      try {
+        saved = await api.projects.saveFile(projectId, bibFile.path, nextBib);
+      } catch (err) {
+        reportError(err, 'Ajout de la référence impossible');
+        throw err; // la barre latérale n'affiche pas « inséré »
+      }
       setFiles((prev) => {
         const exists = prev.some((f) => f.path === saved.file.path);
         const updated = exists
@@ -402,7 +503,15 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ projectId, onBack 
         <div className="flex items-center gap-2 min-w-0">
           <button
             onClick={async () => {
-              await flushDirtyFiles();
+              const ok = await flushDirtyFiles();
+              if (
+                !ok &&
+                !window.confirm(
+                  "Certaines modifications n'ont pas pu être sauvegardées et seront perdues. Quitter quand même ?"
+                )
+              ) {
+                return;
+              }
               onBack();
             }}
             title="Retour aux projets"
@@ -441,6 +550,11 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ projectId, onBack 
                 <Loader2 className="w-3 h-3 animate-spin" />
                 Sauvegarde...
               </>
+            ) : isDirty && saveFailed ? (
+              <span className="text-red-400 flex items-center gap-1" title={actionError ?? undefined}>
+                <AlertTriangle className="w-3 h-3" />
+                Non sauvegardé
+              </span>
             ) : isDirty ? (
               <span className="text-amber-400">● Modifié</span>
             ) : (
@@ -529,6 +643,23 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ projectId, onBack 
           </button>
         </div>
       </header>
+
+      {actionError && (
+        <div
+          role="alert"
+          className="px-4 py-2 border-b border-red-500/30 bg-red-500/10 text-xs text-red-200 flex items-center gap-2 shrink-0"
+        >
+          <AlertTriangle className="w-3.5 h-3.5 text-red-400 shrink-0" />
+          <span className="flex-1 min-w-0">{actionError}</span>
+          <button
+            onClick={() => setActionError(null)}
+            title="Masquer"
+            className="p-1 rounded hover:bg-red-500/20 text-red-300 cursor-pointer"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* Main 3-column Body */}
       <div className="flex-1 flex min-h-0 overflow-hidden">
