@@ -4,7 +4,12 @@ import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import { config } from './config.js';
 import { purgeExpiredSessions } from './db.js';
-import { type AppVariables, csrfMiddleware, syncAdminRolesWithConfig } from './middleware/auth.js';
+import {
+  type AppVariables,
+  csrfMiddleware,
+  isHttpsRequest,
+  syncAdminRolesWithConfig,
+} from './middleware/auth.js';
 import { adminRoutes } from './routes/admin.js';
 import { authRoutes } from './routes/auth.js';
 import { citationRoutes } from './routes/citations.js';
@@ -30,11 +35,38 @@ const STATIC_MIME: Record<string, string> = {
 const app = new Hono<{ Variables: AppVariables }>();
 
 // Global security headers (FortiGate / Homelab hardening)
+/**
+ * CSP de l'application (pages HTML). 'wasm-unsafe-eval' : compilation WebAssembly de BusyTeX.
+ * blob: pour les workers / aperçus générés côté client, googleusercontent pour les avatars Google.
+ */
+const APP_CSP = [
+  "default-src 'self'",
+  "script-src 'self' 'wasm-unsafe-eval'",
+  "worker-src 'self' blob:",
+  "connect-src 'self' blob: data:",
+  "img-src 'self' data: blob: https://*.googleusercontent.com",
+  "style-src 'self' 'unsafe-inline'",
+  "font-src 'self' data:",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+  "frame-ancestors 'self'",
+].join('; ');
+
 app.use('*', async (c, next) => {
   await next();
   c.header('X-Content-Type-Options', 'nosniff');
   c.header('X-Frame-Options', 'SAMEORIGIN');
   c.header('Referrer-Policy', 'strict-origin-when-cross-origin');
+  if (
+    !c.res.headers.has('Content-Security-Policy') &&
+    (c.res.headers.get('Content-Type') ?? '').startsWith('text/html')
+  ) {
+    c.header('Content-Security-Policy', APP_CSP);
+  }
+  if (isHttpsRequest(c)) {
+    c.header('Strict-Transport-Security', 'max-age=31536000');
+  }
 });
 
 // CSRF protection on API routes
@@ -112,7 +144,12 @@ app.get('*', (c) => {
     );
   }
 
-  const urlPath = decodeURIComponent(new URL(c.req.url).pathname);
+  let urlPath: string;
+  try {
+    urlPath = decodeURIComponent(new URL(c.req.url).pathname);
+  } catch {
+    return c.text('URL invalide.', 400);
+  }
   const safeRel = urlPath.replace(/^\/+/, '');
   const candidate = path.resolve(config.webDistDir, safeRel);
 

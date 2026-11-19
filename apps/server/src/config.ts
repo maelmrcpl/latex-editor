@@ -58,6 +58,17 @@ if (adminEmails.length === 0) {
   console.warn('[SECURITY WARNING] ADMIN_EMAILS est vide : personne ne pourra valider les comptes.');
 }
 
+// En-têtes X-Forwarded-* : ignorés par défaut, car falsifiables par tout client qui joint le port directement.
+const trustProxy = (process.env.TRUST_PROXY ?? 'false').toLowerCase() === 'true';
+// IP du reverse-proxy (FortiGate) : seuls ses en-têtes X-Forwarded-* sont acceptés.
+const trustedProxyIps = parseList(process.env.TRUSTED_PROXY_IPS).map((ip) => ip.replace(/^::ffff:/, ''));
+if (trustProxy && trustedProxyIps.length === 0) {
+  console.warn(
+    '[SECURITY WARNING] TRUST_PROXY=true sans TRUSTED_PROXY_IPS : les en-têtes X-Forwarded-* sont acceptés ' +
+      "de n'importe quel client. Renseigne l'IP de ton reverse-proxy dans TRUSTED_PROXY_IPS."
+  );
+}
+
 const dataDirInput = process.env.DATA_DIR || path.join(repoRoot, 'data');
 const dataDir = path.isAbsolute(dataDirInput)
   ? dataDirInput
@@ -85,7 +96,8 @@ export const config = {
   /** Quota disque par utilisateur, admins exemptés (USER_QUOTA_MB, défaut 500 Mo, 0 = illimité) */
   userQuotaBytes: parsePositiveMb(process.env.USER_QUOTA_MB, 500, true),
   sessionTtlMs: (Number.parseInt(process.env.SESSION_TTL_HOURS ?? '168', 10) || 168) * 3600 * 1000,
-  trustProxy: (process.env.TRUST_PROXY ?? 'true').toLowerCase() === 'true',
+  trustProxy,
+  trustedProxyIps,
   forceSecureCookie: (process.env.FORCE_SECURE_COOKIE ?? 'false').toLowerCase() === 'true',
   cookieName: 'prism_latex_session',
   oauthCookieName: 'prism_latex_oauth',

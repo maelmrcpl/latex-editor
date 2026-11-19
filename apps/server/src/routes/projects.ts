@@ -35,6 +35,11 @@ const INLINE_RAW_MIME = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/
 const MAX_JSON_BODY_BYTES = 5 * 1024 * 1024; // sauvegarde d'un fichier texte depuis l'éditeur
 const MULTIPART_OVERHEAD_BYTES = 1024 * 1024;
 
+/** Échappe les jokers LIKE (% et _) d'un chemin utilisé comme préfixe (avec ESCAPE '!'). */
+function escapeLike(value: string): string {
+  return value.replace(/[!%_]/g, (ch) => `!${ch}`);
+}
+
 function formatMb(bytes: number): string {
   return `${Math.round(bytes / (1024 * 1024))} Mo`;
 }
@@ -574,9 +579,9 @@ projectRoutes.post('/:id/rename', jsonBodyLimit, async (c) => {
   const affectedRows = db
     .prepare(
       `SELECT id, path FROM project_files
-       WHERE project_id = ? AND (path = ? OR path LIKE ?)`
+       WHERE project_id = ? AND (path = ? OR path LIKE ? ESCAPE '!')`
     )
-    .all(projectId, oldPath, `${oldPath}/%`) as unknown as Array<{ id: string; path: string }>;
+    .all(projectId, oldPath, `${escapeLike(oldPath)}/%`) as unknown as Array<{ id: string; path: string }>;
 
   const updateStmt = db.prepare('UPDATE project_files SET path = ?, updated_at = ? WHERE id = ?');
   for (const row of affectedRows) {
@@ -615,8 +620,8 @@ projectRoutes.delete('/:id/files', (c) => {
   deleteProjectPathDisk(projectId, cleanPath);
   db.prepare(
     `DELETE FROM project_files
-     WHERE project_id = ? AND (path = ? OR path LIKE ?)`
-  ).run(projectId, cleanPath, `${cleanPath}/%`);
+     WHERE project_id = ? AND (path = ? OR path LIKE ? ESCAPE '!')`
+  ).run(projectId, cleanPath, `${escapeLike(cleanPath)}/%`);
 
   db.prepare('UPDATE projects SET updated_at = ? WHERE id = ?').run(Date.now(), projectId);
   return c.json({ ok: true });

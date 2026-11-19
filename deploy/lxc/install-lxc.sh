@@ -18,10 +18,16 @@ fi
 
 echo "==> [1/6] Vérification des prérequis système & Node.js 24..."
 apt-get update -qq
-apt-get install -y -qq curl ca-certificates gnupg git tar
+apt-get install -y -qq curl ca-certificates gnupg git tar rsync
 
 if ! command -v node >/dev/null 2>&1 || [[ "$(node -v | cut -d. -f1 | tr -d 'v')" -lt 22 ]]; then
-  curl -fsSL https://deb.nodesource.com/setup_24.x | bash -
+  # Dépôt NodeSource ajouté explicitement avec sa clé de signature (pas de script distant exécuté en root)
+  install -d -m 0755 /etc/apt/keyrings
+  curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
+    | gpg --dearmor --yes -o /etc/apt/keyrings/nodesource.gpg
+  echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_24.x nodistro main" \
+    > /etc/apt/sources.list.d/nodesource.list
+  apt-get update -qq
   apt-get install -y -qq nodejs
 fi
 
@@ -43,6 +49,11 @@ cd "${APP_DIR}"
 echo "==> [4/6] Installation des dépendances npm, téléchargement BusyTeX WASM & build..."
 npm ci
 npm run setup:wasm
+if ! node scripts/verify-busytex.mjs; then
+  echo "Assets BusyTeX corrompus ou modifiés : suppression, relance le script pour les retélécharger."
+  rm -rf "${APP_DIR}/apps/web/public/core/busytex"
+  exit 1
+fi
 npm run build
 
 chown -R "${SERVICE_USER}:${SERVICE_USER}" "${DATA_DIR}"
@@ -59,6 +70,7 @@ if [[ ! -f "${ENV_FILE}" ]]; then
   echo ""
   read -r -p "Email(s) Google administrateur(s), séparés par des virgules : " ADMIN_EMAILS
   read -r -p "Domaines email autorisés à s'inscrire (vide = tous) : " ALLOWED_EMAIL_DOMAINS
+  read -r -p "IP du reverse-proxy (FortiGate) vue par ce conteneur : " TRUSTED_PROXY_IPS
 
   cat > "${ENV_FILE}" <<EOF
 NODE_ENV=production
@@ -74,6 +86,7 @@ MAX_UPLOAD_MB=25
 USER_QUOTA_MB=500
 SESSION_TTL_HOURS=168
 TRUST_PROXY=true
+TRUSTED_PROXY_IPS=${TRUSTED_PROXY_IPS}
 FORCE_SECURE_COOKIE=false
 EOF
   chmod 600 "${ENV_FILE}"

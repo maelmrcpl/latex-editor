@@ -1,4 +1,5 @@
 import type { Context, MiddlewareHandler } from 'hono';
+import { getConnInfo } from '@hono/node-server/conninfo';
 import { getCookie } from 'hono/cookie';
 import type { AuthUser, UserRole, UserStatus } from '@prism-latex/shared';
 import { config } from '../config.js';
@@ -36,22 +37,44 @@ export function mapAuthUser(row: DbUserRow): AuthUser {
   };
 }
 
+/** Adresse IP de la connexion TCP (le reverse-proxy quand il y en a un). */
+function socketAddress(c: Context): string | null {
+  try {
+    const address = getConnInfo(c).remote.address;
+    return address ? address.replace(/^::ffff:/, '') : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Les en-têtes X-Forwarded-* ne sont pris en compte que si TRUST_PROXY=true et, quand
+ * TRUSTED_PROXY_IPS est renseigné, que la connexion vient bien de l'un de ces proxys.
+ */
+export function trustsProxyHeaders(c: Context): boolean {
+  if (!config.trustProxy) return false;
+  if (config.trustedProxyIps.length === 0) return true;
+  const address = socketAddress(c);
+  return address !== null && config.trustedProxyIps.includes(address);
+}
+
 export function getClientIp(c: Context): string {
-  if (config.trustProxy) {
+  if (trustsProxyHeaders(c)) {
+    // Dernière entrée : celle ajoutée par notre proxy (les précédentes viennent du client)
     const xff = c.req.header('x-forwarded-for');
     if (xff) {
-      const first = xff.split(',')[0]?.trim();
-      if (first) return first;
+      const last = xff.split(',').at(-1)?.trim();
+      if (last) return last;
     }
     const realIp = c.req.header('x-real-ip')?.trim();
     if (realIp) return realIp;
   }
-  return 'local';
+  return socketAddress(c) ?? 'local';
 }
 
 export function isHttpsRequest(c: Context): boolean {
   if (config.forceSecureCookie) return true;
-  if (config.trustProxy) {
+  if (trustsProxyHeaders(c)) {
     const proto = c.req.header('x-forwarded-proto')?.split(',')[0]?.trim().toLowerCase();
     if (proto === 'https') return true;
   }
@@ -75,7 +98,7 @@ export const csrfMiddleware: MiddlewareHandler = async (c, next) => {
   if (origin) {
     try {
       const originHost = new URL(origin).host.toLowerCase();
-      const forwardedHost = config.trustProxy
+      const forwardedHost = trustsProxyHeaders(c)
         ? c.req.header('x-forwarded-host')?.split(',')[0]?.trim().toLowerCase()
         : undefined;
       const host = (forwardedHost || c.req.header('host') || '').toLowerCase();

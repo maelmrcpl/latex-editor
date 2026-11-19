@@ -84,7 +84,10 @@ Le script installe Node 24, télécharge les assets WASM BusyTeX (pour qu'ils so
 - Redirige le flux HTTPS externe vers `http://<IP_DU_LXC>:3000`.
 - Active l'injection des en-têtes HTTP standards sur le Virtual Server / Web Proxy FortiGate :
   - `X-Forwarded-For` (IP client enregistrée sur les sessions grâce à `TRUST_PROXY=true`)
-  - `X-Forwarded-Proto: https` (active automatiquement l'attribut `Secure` sur le cookie de session `HttpOnly`)
+  - `X-Forwarded-Proto: https` (active automatiquement l'attribut `Secure` sur le cookie de session `HttpOnly` et l'en-tête HSTS)
+- Renseigne l'IP du FortiGate (telle que vue par le LXC) dans `TRUSTED_PROXY_IPS` : les en-têtes `X-Forwarded-*` venant de toute autre IP sont ignorés, ce qui empêche de les falsifier en joignant directement le port `3000`. Idéalement, n'autorise aussi le port `3000` que depuis le FortiGate (pare-feu Proxmox).
+
+Le script vérifie l'intégrité des assets BusyTeX téléchargés grâce aux empreintes SHA-256 de `deploy/busytex-assets.sha256`. Après une mise à jour volontaire de `texlyre-busytex`, régénère ce fichier avec `node scripts/verify-busytex.mjs --write` et commite-le.
 
 ---
 

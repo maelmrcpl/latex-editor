@@ -30,8 +30,44 @@ function buildCiteKey(authors: string[], year: number | null, title: string): st
   return `${slugifyToken(lastName) || 'ref'}${year ?? ''}${firstWord}`;
 }
 
+const BIBTEX_ESCAPES: Record<string, string> = {
+  '\\': '\\textbackslash{}',
+  '{': '\\{',
+  '}': '\\}',
+  '&': '\\&',
+  '%': '\\%',
+  $: '\\$',
+  '#': '\\#',
+  _: '\\_',
+  '^': '\\textasciicircum{}',
+  '~': '\\textasciitilde{}',
+};
+
+/**
+ * Les métadonnées viennent d'API externes (arXiv, Crossref) : on neutralise tout caractère
+ * actif LaTeX/BibTeX pour qu'un titre piégé ne puisse ni casser l'entrée ni injecter de commande.
+ */
 function escapeBibtex(value: string): string {
-  return value.replace(/\s+/g, ' ').trim().replace(/([&%$#_])/g, '\\$1');
+  return value
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/[\\{}&%$#_^~]/g, (ch) => BIBTEX_ESCAPES[ch]);
+}
+
+/** Identifiants (DOI, arXiv) insérés tels quels : on ne garde que les caractères sûrs. */
+function sanitizeIdentifier(value: string): string {
+  return value.replace(/[^\w.\-/:;()<>]/g, '').slice(0, 200);
+}
+
+/** URL de source affichée en lien cliquable : uniquement http(s). */
+function safeHttpUrl(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' || url.protocol === 'http:' ? url.toString() : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function decodeXmlEntities(str: string): string {
@@ -57,13 +93,16 @@ async function searchArxiv(query: string): Promise<CitationResult[]> {
 
   for (const entry of entries) {
     const idRaw = entry.match(/<id>([\s\S]*?)<\/id>/)?.[1]?.trim() ?? '';
-    const arxivId = idRaw.replace(/^https?:\/\/arxiv\.org\/abs\//, '').replace(/v\d+$/, '');
+    const arxivId = sanitizeIdentifier(
+      idRaw.replace(/^https?:\/\/arxiv\.org\/abs\//, '').replace(/v\d+$/, '')
+    );
     const title = decodeXmlEntities(
       (entry.match(/<title>([\s\S]*?)<\/title>/)?.[1] ?? '').replace(/\s+/g, ' ').trim()
     );
     const summary = decodeXmlEntities(
       (entry.match(/<summary>([\s\S]*?)<\/summary>/)?.[1] ?? '').replace(/\s+/g, ' ').trim()
     );
+    if (!arxivId) continue;
     const published = entry.match(/<published>(\d{4})/)?.[1];
     const year = published ? Number.parseInt(published, 10) : null;
 
@@ -131,9 +170,10 @@ async function searchCrossref(query: string): Promise<CitationResult[]> {
       .map((a) => (a.family && a.given ? `${a.family}, ${a.given}` : a.family || a.name || ''))
       .filter(Boolean);
 
-    const year = item.issued?.['date-parts']?.[0]?.[0] ?? null;
+    const rawYear = Number(item.issued?.['date-parts']?.[0]?.[0]);
+    const year = Number.isInteger(rawYear) ? rawYear : null;
     const venue = item['container-title']?.[0] ?? item.publisher;
-    const doi = item.DOI;
+    const doi = item.DOI ? sanitizeIdentifier(item.DOI) || undefined : undefined;
     const citeKey = buildCiteKey(authors, year, title);
     const entryType = item.type === 'proceedings-article' ? 'inproceedings' : item.type === 'book' ? 'book' : 'article';
     const venueField = entryType === 'inproceedings' ? 'booktitle' : 'journal';
@@ -156,7 +196,7 @@ async function searchCrossref(query: string): Promise<CitationResult[]> {
       year,
       venue,
       doi,
-      url: doi ? `https://doi.org/${doi}` : item.URL,
+      url: doi ? `https://doi.org/${doi}` : safeHttpUrl(item.URL),
       citeKey,
       bibtex: lines.join('\n'),
     });
