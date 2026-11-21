@@ -84,6 +84,16 @@ function addNewProjectFile(projectId: string, cleanPath: string, data: Buffer | 
   insertFileStmt.run(randomUUID(), projectId, cleanPath, meta.isBinary ? 1 : 0, meta.mimeType, size, now);
 }
 
+const insertFolderStmt = db.prepare(
+  'INSERT OR IGNORE INTO project_folders (project_id, path, created_at) VALUES (?, ?, ?)'
+);
+
+/** Crée un dossier (éventuellement vide) sur disque et l'enregistre dans le projet. */
+function addProjectFolder(projectId: string, cleanPath: string, now: number): void {
+  fs.mkdirSync(resolveSafeProjectFilePath(projectId, cleanPath), { recursive: true });
+  insertFolderStmt.run(projectId, cleanPath, now);
+}
+
 /** Supprime un projet à moitié créé (import ou duplication interrompus). */
 function discardProject(projectId: string): void {
   db.prepare('DELETE FROM projects WHERE id = ?').run(projectId);
@@ -167,8 +177,9 @@ projectRoutes.post('/import', uploadBodyLimit, async (c) => {
   }
 
   let entries: Array<{ path: string; data: Uint8Array }>;
+  let folders: string[];
   try {
-    entries = readImportArchive(new Uint8Array(await archive.arrayBuffer()));
+    ({ files: entries, folders } = readImportArchive(new Uint8Array(await archive.arrayBuffer())));
   } catch (err) {
     return c.json({ error: (err as Error).message }, 400);
   }
@@ -204,6 +215,9 @@ projectRoutes.post('/import', uploadBodyLimit, async (c) => {
   try {
     for (const entry of entries) {
       addNewProjectFile(projectId, entry.path, Buffer.from(entry.data), now);
+    }
+    for (const folder of folders) {
+      addProjectFolder(projectId, folder, now);
     }
   } catch {
     discardProject(projectId);
@@ -358,6 +372,12 @@ projectRoutes.post('/:id/duplicate', (c) => {
       }
       addNewProjectFile(projectId, row.path, buf, now);
       copied++;
+    }
+    const folderRows = db
+      .prepare('SELECT path FROM project_folders WHERE project_id = ? ORDER BY path ASC')
+      .all(sourceId) as unknown as Array<{ path: string }>;
+    for (const row of folderRows) {
+      addProjectFolder(projectId, row.path, now);
     }
   } catch {
     discardProject(projectId);
@@ -723,13 +743,8 @@ projectRoutes.post('/:id/folders', jsonBodyLimit, async (c) => {
     }
   }
 
-  fs.mkdirSync(resolveSafeProjectFilePath(projectId, cleanPath), { recursive: true });
   const now = Date.now();
-  db.prepare('INSERT INTO project_folders (project_id, path, created_at) VALUES (?, ?, ?)').run(
-    projectId,
-    cleanPath,
-    now
-  );
+  addProjectFolder(projectId, cleanPath, now);
   db.prepare('UPDATE projects SET updated_at = ? WHERE id = ?').run(now, projectId);
   return c.json({ path: cleanPath }, 201);
 });

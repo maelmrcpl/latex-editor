@@ -16,6 +16,12 @@ export interface ImportedEntry {
   data: Uint8Array;
 }
 
+export interface ImportedArchive {
+  files: ImportedEntry[];
+  /** Dossiers vides de l'archive (sans fichier ni sous-dossier conservé). */
+  folders: string[];
+}
+
 function isIgnored(path: string): boolean {
   const segments = path.split('/');
   const base = segments[segments.length - 1];
@@ -28,17 +34,25 @@ function isIgnored(path: string): boolean {
 }
 
 /**
- * Décompresse une archive .zip en fichiers de projet aux chemins validés.
+ * Décompresse une archive .zip en fichiers de projet aux chemins validés, en gardant ses dossiers vides.
  * Si tout le contenu est rangé dans un unique dossier (zip d'un dossier), ce dossier est retiré.
  */
-export function readImportArchive(zip: Uint8Array): ImportedEntry[] {
+export function readImportArchive(zip: Uint8Array): ImportedArchive {
   let fileCount = 0;
   let declaredTotal = 0;
+  const dirNames: string[] = [];
   let unzipped: Record<string, Uint8Array>;
   try {
     unzipped = unzipSync(zip, {
       filter: (file) => {
-        if (file.name.endsWith('/') || isIgnored(file.name.replace(/\\/g, '/'))) return false;
+        const name = file.name.replace(/\\/g, '/');
+        if (name.endsWith('/')) {
+          // Entrée de dossier : rien à décompresser, on la garde de côté
+          const dir = name.replace(/\/+$/, '');
+          if (dir && !isIgnored(dir) && dirNames.length < MAX_IMPORT_FILES) dirNames.push(dir);
+          return false;
+        }
+        if (isIgnored(name)) return false;
         fileCount++;
         declaredTotal += file.originalSize;
         if (fileCount > MAX_IMPORT_FILES) {
@@ -65,8 +79,12 @@ export function readImportArchive(zip: Uint8Array): ImportedEntry[] {
     throw new Error("L'archive est vide.");
   }
 
-  // Dossier racine commun ?
-  const firstSegments = new Set(raw.map((e) => (e.name.includes('/') ? e.name.split('/')[0] : '')));
+  // Dossier racine commun ? Les dossiers comptent aussi : un « autre/ » vide à côté empêche le retrait.
+  const firstSegments = new Set(
+    [...raw.map((e) => e.name), ...dirNames.map((d) => `${d}/`)].map((n) =>
+      n.includes('/') ? n.split('/')[0] : ''
+    )
+  );
   const [onlySegment] = [...firstSegments];
   const stripPrefix = firstSegments.size === 1 && onlySegment && onlySegment !== '..' && onlySegment !== '.' ? `${onlySegment}/` : '';
 
@@ -86,7 +104,31 @@ export function readImportArchive(zip: Uint8Array): ImportedEntry[] {
     }
     entries.push({ path, data });
   }
-  return entries;
+
+  // Dossiers vides : sans fichier ni autre dossier conservé à l'intérieur
+  const dirs = new Set<string>();
+  for (const name of dirNames) {
+    if (!name.startsWith(stripPrefix)) continue;
+    const rel = name.slice(stripPrefix.length);
+    if (!rel) continue; // le dossier racine retiré lui-même
+    try {
+      dirs.add(normalizeProjectPath(rel));
+    } catch {
+      // Chemin de dossier invalide : ignoré
+    }
+  }
+  const occupied = [...seen, ...dirs];
+  const parentIsFile = (dir: string) => {
+    const segments = dir.split('/');
+    return segments.some((_, i) => i > 0 && seen.has(segments.slice(0, i).join('/')));
+  };
+  const folders = [...dirs]
+    .filter(
+      (dir) => !seen.has(dir) && !parentIsFile(dir) && !occupied.some((p) => p.startsWith(`${dir}/`))
+    )
+    .sort();
+
+  return { files: entries, folders };
 }
 
 const decoder = new TextDecoder('utf-8', { fatal: false });
