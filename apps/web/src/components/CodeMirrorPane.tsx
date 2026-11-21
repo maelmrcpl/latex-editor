@@ -46,6 +46,8 @@ interface CodeMirrorPaneProps {
   onSaveShortcut: () => void;
   onCompileShortcut: () => void;
   onForwardSyncShortcut: (line: number) => void;
+  /** Position du curseur (ligne, colonne), base 1 */
+  onCursorChange?: (line: number, col: number) => void;
 }
 
 export const CodeMirrorPane = forwardRef<CodeMirrorHandle, CodeMirrorPaneProps>(
@@ -59,6 +61,7 @@ export const CodeMirrorPane = forwardRef<CodeMirrorHandle, CodeMirrorPaneProps>(
       onSaveShortcut,
       onCompileShortcut,
       onForwardSyncShortcut,
+      onCursorChange,
     },
     ref
   ) => {
@@ -70,6 +73,7 @@ export const CodeMirrorPane = forwardRef<CodeMirrorHandle, CodeMirrorPaneProps>(
       onSaveShortcut,
       onCompileShortcut,
       onForwardSyncShortcut,
+      onCursorChange,
     });
 
     filesRef.current = allFiles;
@@ -78,6 +82,7 @@ export const CodeMirrorPane = forwardRef<CodeMirrorHandle, CodeMirrorPaneProps>(
       onSaveShortcut,
       onCompileShortcut,
       onForwardSyncShortcut,
+      onCursorChange,
     };
 
     useImperativeHandle(ref, () => ({
@@ -163,6 +168,11 @@ export const CodeMirrorPane = forwardRef<CodeMirrorHandle, CodeMirrorPaneProps>(
             if (update.docChanged) {
               callbacksRef.current.onChange(update.state.doc.toString());
             }
+            if (update.docChanged || update.selectionSet || update.startState.doc.length === 0) {
+              const head = update.state.selection.main.head;
+              const line = update.state.doc.lineAt(head);
+              callbacksRef.current.onCursorChange?.(line.number, head - line.from + 1);
+            }
           }),
         ],
       });
@@ -214,7 +224,7 @@ export const CodeMirrorPane = forwardRef<CodeMirrorHandle, CodeMirrorPaneProps>(
       view.dispatch(setDiagnostics(view.state, cmDiags));
     }, [diagnostics, filePath]);
 
-    return <div ref={hostRef} className="w-full h-full overflow-hidden bg-zinc-950" />;
+    return <div ref={hostRef} className="w-full flex-1 min-h-0 overflow-hidden bg-surface-container-lowest" />;
   }
 );
 

@@ -3,9 +3,7 @@ import {
   AlertTriangle,
   ArrowLeft,
   ArrowRightLeft,
-  CheckCircle2,
-  Download,
-  Loader2,
+  FolderArchive,
   PanelLeftClose,
   PanelLeftOpen,
   Play,
@@ -29,6 +27,8 @@ import { DiagnosticsDrawer } from './DiagnosticsDrawer';
 import { PdfPreviewPane } from './PdfPreviewPane';
 import { SidebarExplorer } from './SidebarExplorer';
 import { SynTeXLogo } from './SynTeXLogo';
+import { useDialogs } from './ui/Dialog';
+import { Button, cx, IconButton, LoadingScreen, Spinner, StatusDot } from './ui';
 
 interface WorkspaceViewProps {
   projectId: string;
@@ -48,9 +48,11 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ projectId, onBack 
 
   // Layout state
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [sidebarWidth, setSidebarWidth] = useState(250);
-  const [editorRatio, setEditorRatio] = useState(0.5);
+  const [sidebarWidth, setSidebarWidth] = useState(220);
+  const [editorRatio, setEditorRatio] = useState(1.25 / 2.25);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [resizing, setResizing] = useState(false);
+  const dialogs = useDialogs();
 
   // Compilation & SyncTeX state
   const [autoCompile, setAutoCompile] = useState(false);
@@ -62,6 +64,8 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ projectId, onBack 
   const [pdfBytes, setPdfBytes] = useState<Uint8Array | undefined>(undefined);
   const [diagnostics, setDiagnostics] = useState<DiagnosticItem[]>([]);
   const [rawLog, setRawLog] = useState('');
+  const [lastDurationMs, setLastDurationMs] = useState<number | null>(null);
+  const [cursor, setCursor] = useState<{ line: number; col: number }>({ line: 1, col: 1 });
   const [syncMapper, setSyncMapper] = useState<SyncTeXMapper | null>(null);
   const [forwardHighlight, setForwardHighlight] = useState<
     (SyncTeXForwardResult & { nonce: number }) | null
@@ -231,6 +235,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ projectId, onBack 
       });
 
       setRawLog(out.log);
+      setLastDurationMs(out.success ? out.durationMs : null);
       setDiagnostics(out.diagnostics);
 
       if (out.pdf && out.pdf.byteLength > 0) {
@@ -454,10 +459,12 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ projectId, onBack 
     e.preventDefault();
     const startX = e.clientX;
     const startWidth = sidebarWidth;
+    setResizing(true);
     const onMove = (ev: MouseEvent) => {
       setSidebarWidth(Math.max(190, Math.min(420, startWidth + (ev.clientX - startX))));
     };
     const onUp = () => {
+      setResizing(false);
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
     };
@@ -468,6 +475,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ projectId, onBack 
   const splitContainerRef = useRef<HTMLDivElement | null>(null);
   const startSplitResize = (e: React.MouseEvent) => {
     e.preventDefault();
+    setResizing(true);
     const onMove = (ev: MouseEvent) => {
       const container = splitContainerRef.current;
       if (!container) return;
@@ -476,6 +484,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ projectId, onBack 
       setEditorRatio(Math.max(0.25, Math.min(0.75, ratio)));
     };
     const onUp = () => {
+      setResizing(false);
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
     };
@@ -484,236 +493,219 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ projectId, onBack 
   };
 
   if (!project) {
-    return (
-      <div className="h-screen bg-zinc-950 text-zinc-400 flex items-center justify-center gap-2 text-sm">
-        <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />
-        Ouverture de l'espace de travail...
-      </div>
-    );
+    return <LoadingScreen label="Ouverture de l'espace de travail..." />;
   }
 
   const activeFile = files.find((f) => f.path === activePath);
   const isDirty = dirtyPaths.size > 0;
 
-  return (
-    <div className="h-screen w-screen overflow-hidden flex flex-col bg-zinc-950 text-zinc-100">
-      {/* Top Workspace Header */}
-      <header className="h-12 px-3 border-b border-zinc-800 bg-zinc-950 flex items-center justify-between gap-3 shrink-0">
-        {/* Left: Back, Sidebar Toggle, Project Title & Active File */}
-        <div className="flex items-center gap-2 min-w-0">
-          <button
-            onClick={async () => {
-              const ok = await flushDirtyFiles();
-              if (
-                !ok &&
-                !window.confirm(
-                  "Certaines modifications n'ont pas pu être sauvegardées et seront perdues. Quitter quand même ?"
-                )
-              ) {
-                return;
-              }
-              onBack();
-            }}
-            title="Retour aux projets"
-            className="p-1.5 rounded-lg hover:bg-zinc-900 text-zinc-400 hover:text-zinc-100 transition cursor-pointer"
-          >
-            <ArrowLeft className="w-4 h-4" />
-          </button>
+  const handleBack = async () => {
+    const ok = await flushDirtyFiles();
+    if (
+      !ok &&
+      !(await dialogs.confirm({
+        title: 'Quitter sans sauvegarder ?',
+        message: "Certaines modifications n'ont pas pu être sauvegardées et seront perdues.",
+        confirmLabel: 'Quitter quand même',
+        tone: 'danger',
+      }))
+    ) {
+      return;
+    }
+    onBack();
+  };
 
-          <button
+  return (
+    <div className="h-screen w-screen overflow-hidden flex flex-col bg-background text-on-background">
+      {/* Barre supérieure */}
+      <header className="h-12 px-gutter-md border-b border-outline-variant bg-surface flex items-center justify-between gap-gutter-md shrink-0">
+        <div className="flex items-center gap-gutter-sm min-w-0">
+          <IconButton label="Retour aux projets" onClick={() => void handleBack()} className="rounded-sm">
+            <ArrowLeft className="w-[18px] h-[18px]" />
+          </IconButton>
+          <IconButton
+            label={sidebarOpen ? 'Masquer le panneau latéral' : 'Afficher le panneau latéral'}
             onClick={() => setSidebarOpen((o) => !o)}
-            title={sidebarOpen ? 'Masquer le panneau latéral' : 'Afficher le panneau latéral'}
-            className="p-1.5 rounded-lg hover:bg-zinc-900 text-zinc-400 hover:text-zinc-100 transition cursor-pointer"
+            className="rounded-sm"
           >
             {sidebarOpen ? (
-              <PanelLeftClose className="w-4 h-4" />
+              <PanelLeftClose className="w-[18px] h-[18px]" />
             ) : (
-              <PanelLeftOpen className="w-4 h-4" />
+              <PanelLeftOpen className="w-[18px] h-[18px]" />
             )}
-          </button>
+          </IconButton>
 
-          <div className="h-4 w-px bg-zinc-800 mx-0.5" />
-
-          <SynTeXLogo variant="compact" className="mr-1 shrink-0" />
-          <span className="text-zinc-700">|</span>
-          <span className="font-medium text-sm text-zinc-100 truncate max-w-[200px]">
-            {project.name}
-          </span>
-          <span className="text-zinc-600">/</span>
-          <span className="font-mono text-xs text-indigo-300 truncate max-w-[220px]">
-            {activePath}
-          </span>
-
-          <span className="ml-2 text-[11px] text-zinc-500 hidden md:inline-flex items-center gap-1">
-            {saving ? (
-              <>
-                <Loader2 className="w-3 h-3 animate-spin" />
-                Sauvegarde...
-              </>
-            ) : isDirty && saveFailed ? (
-              <span className="text-red-400 flex items-center gap-1" title={actionError ?? undefined}>
-                <AlertTriangle className="w-3 h-3" />
-                Non sauvegardé
-              </span>
-            ) : isDirty ? (
-              <span className="text-amber-400">● Modifié</span>
-            ) : (
-              <>
-                <CheckCircle2 className="w-3 h-3 text-emerald-500" />
-                Sauvegardé
-              </>
-            )}
-          </span>
+          <div className="flex items-center gap-gutter-sm min-w-0 ml-gutter-xs">
+            <span className="font-display text-title-md text-on-surface truncate" title={project.name}>
+              {project.name}
+            </span>
+            <span className="hidden lg:inline font-mono text-code-sm font-normal text-on-surface-variant truncate max-w-[260px]">
+              {activePath}
+            </span>
+            <span className="hidden sm:inline-flex shrink-0" role="status">
+              {saving ? (
+                <span className="inline-flex items-center gap-gutter-xs text-label-sm text-on-surface-variant">
+                  <Spinner className="w-3 h-3" />
+                  Sauvegarde...
+                </span>
+              ) : isDirty && saveFailed ? (
+                <StatusDot tone="error" title={actionError ?? undefined} className="text-label-sm text-error">
+                  Non sauvegardé
+                </StatusDot>
+              ) : isDirty ? (
+                <StatusDot tone="warning" className="text-label-sm">
+                  Modifié
+                </StatusDot>
+              ) : (
+                <StatusDot tone="success" className="text-label-sm">
+                  Sauvegardé
+                </StatusDot>
+              )}
+            </span>
+          </div>
         </div>
 
-        {/* Right: WASM status, Engine selector, SyncTeX, Save, Compile */}
-        <div className="flex items-center gap-2 shrink-0">
-          <span
-            title={wasmStatus.message}
-            className={`hidden lg:inline-flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-full border ${
-              wasmStatus.phase === 'missing-assets' || wasmStatus.phase === 'error'
-                ? 'bg-amber-500/10 border-amber-500/30 text-amber-300'
-                : 'bg-zinc-900 border-zinc-800 text-zinc-400'
-            }`}
-          >
-            {(wasmStatus.phase === 'downloading' || wasmStatus.phase === 'compiling') && (
-              <Loader2 className="w-3 h-3 animate-spin text-indigo-400" />
-            )}
-            <span className="max-w-[230px] truncate">{wasmStatus.message}</span>
-          </span>
+        <div className="flex items-center gap-gutter-sm shrink-0">
+          <CompileStatus status={wasmStatus} durationMs={lastDurationMs} />
 
           <select
             value={project.compiler}
             onChange={(e) => void handleChangeCompiler(e.target.value as CompilerEngine)}
             title="Moteur TeX Live WASM"
-            className="px-2.5 py-1 rounded-lg bg-zinc-900 border border-zinc-800 text-xs text-zinc-200 focus:outline-none focus:border-indigo-500 cursor-pointer"
+            aria-label="Moteur de compilation"
+            className="h-7 pl-gutter-sm pr-1 rounded-sm bg-surface-container-low border border-outline-variant font-mono text-code-sm font-normal text-on-surface focus:outline-none focus:border-primary"
           >
             <option value="pdflatex">pdfLaTeX</option>
             <option value="xelatex">XeLaTeX</option>
             <option value="lualatex">LuaLaTeX</option>
           </select>
 
-          <label className="hidden sm:flex items-center gap-1.5 text-xs text-zinc-400 px-2 py-1 rounded-lg hover:bg-zinc-900 cursor-pointer select-none">
+          <label
+            className="hidden md:inline-flex items-center gap-gutter-xs h-7 px-gutter-sm rounded-sm text-label-md text-on-surface-variant hover:bg-surface-container cursor-pointer select-none transition-colors duration-100"
+            title="Compiler automatiquement après la frappe"
+          >
             <input
               type="checkbox"
               checked={autoCompile}
               onChange={(e) => setAutoCompile(e.target.checked)}
-              className="accent-indigo-500 rounded"
+              className="w-3.5 h-3.5 accent-primary"
             />
             Auto
           </label>
 
-          <button
+          <IconButton
+            label="SyncTeX : aller de la ligne courante au PDF (Ctrl+Shift+J)"
             onClick={() => handleForwardSync()}
             disabled={!syncMapper}
-            title="SyncTeX : Sauter de la ligne courante vers le PDF (Ctrl+Shift+J)"
-            className="p-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 disabled:opacity-40 border border-zinc-800 text-zinc-300 cursor-pointer"
+            className="rounded-sm"
           >
-            <ArrowRightLeft className="w-3.5 h-3.5" />
-          </button>
-
-          <a
+            <ArrowRightLeft className="w-[18px] h-[18px]" />
+          </IconButton>
+          <IconButton
+            label="Exporter le projet complet (.zip)"
             href={api.projects.exportZipUrl(projectId)}
-            title="Exporter le projet complet (.zip)"
-            className="p-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-300"
+            className="rounded-sm"
           >
-            <Download className="w-3.5 h-3.5" />
-          </a>
+            <FolderArchive className="w-[18px] h-[18px]" />
+          </IconButton>
+          <IconButton label="Sauvegarder (Ctrl+S)" onClick={() => void flushDirtyFiles()} className="rounded-sm">
+            <Save className="w-[18px] h-[18px]" />
+          </IconButton>
 
-          <button
-            onClick={() => void flushDirtyFiles()}
-            title="Sauvegarder (Ctrl+S)"
-            className="p-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 cursor-pointer"
-          >
-            <Save className="w-3.5 h-3.5" />
-          </button>
-
-          <button
+          <Button
+            variant="primary"
+            size="md"
             onClick={() => void runCompilation()}
             disabled={compiling}
+            loading={compiling}
+            icon={<Play className="w-4 h-4 fill-current" />}
             title="Compiler en PDF via WebAssembly (Ctrl+Entrée)"
-            className="px-3.5 py-1.5 rounded-lg bg-[#5236FF] hover:bg-[#634BFF] disabled:opacity-60 text-xs font-medium text-white flex items-center gap-1.5 shadow-lg shadow-[#5236FF]/25 transition cursor-pointer"
+            className="px-gutter-md"
           >
-            {compiling ? (
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-            ) : (
-              <Play className="w-3.5 h-3.5 fill-current" />
-            )}
             Compiler
-          </button>
+          </Button>
         </div>
       </header>
 
       {actionError && (
         <div
           role="alert"
-          className="px-4 py-2 border-b border-red-500/30 bg-red-500/10 text-xs text-red-200 flex items-center gap-2 shrink-0"
+          className="px-3 py-1.5 border-b border-outline-variant bg-error-container text-on-error-container text-body-sm flex items-center gap-2 shrink-0 animate-surface-enter"
         >
-          <AlertTriangle className="w-3.5 h-3.5 text-red-400 shrink-0" />
+          <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
           <span className="flex-1 min-w-0">{actionError}</span>
           <button
+            type="button"
             onClick={() => setActionError(null)}
             title="Masquer"
-            className="p-1 rounded hover:bg-red-500/20 text-red-300 cursor-pointer"
+            aria-label="Masquer"
+            className="w-6 h-6 rounded-sm flex items-center justify-center hover:bg-on-error-container/10 transition-colors duration-100"
           >
             <X className="w-3.5 h-3.5" />
           </button>
         </div>
       )}
 
-      {/* Main 3-column Body */}
+      {/* Corps : panneau latéral · éditeur · aperçu PDF */}
       <div className="flex-1 flex min-h-0 overflow-hidden">
-        {sidebarOpen && (
-          <>
-            <div style={{ width: `${sidebarWidth}px` }} className="shrink-0 h-full">
-              <SidebarExplorer
-                projectId={projectId}
-                files={files}
-                rootFile={project.rootFile}
-                activePath={activePath}
-                onSelectFile={handleSelectFile}
-                onCreateFile={handleCreateFile}
-                onUploadFiles={handleUploadFiles}
-                onRenamePath={handleRenamePath}
-                onDeletePath={handleDeletePath}
-                onSetRootFile={handleSetRootFile}
-                onInsertCitation={handleInsertCitation}
-              />
-            </div>
-            <div
-              onMouseDown={startSidebarResize}
-              className="w-1 bg-zinc-900 hover:bg-indigo-500/60 cursor-col-resize transition shrink-0"
+        <div
+          style={{ width: sidebarOpen ? `${sidebarWidth}px` : '0px' }}
+          className={cx(
+            'shrink-0 h-full overflow-hidden border-r border-outline-variant',
+            !sidebarOpen && 'border-r-0',
+            !resizing &&
+              (sidebarOpen
+                ? 'transition-[width] duration-[220ms] ease-enter'
+                : 'transition-[width] duration-150 ease-exit')
+          )}
+          aria-hidden={!sidebarOpen}
+          inert={!sidebarOpen}
+        >
+          <div style={{ width: `${sidebarWidth}px` }} className="h-full">
+            <SidebarExplorer
+              projectId={projectId}
+              files={files}
+              rootFile={project.rootFile}
+              activePath={activePath}
+              onSelectFile={handleSelectFile}
+              onCreateFile={handleCreateFile}
+              onUploadFiles={handleUploadFiles}
+              onRenamePath={handleRenamePath}
+              onDeletePath={handleDeletePath}
+              onSetRootFile={handleSetRootFile}
+              onInsertCitation={handleInsertCitation}
             />
-          </>
-        )}
+          </div>
+        </div>
+        {sidebarOpen && <ResizeHandle onMouseDown={startSidebarResize} label="Redimensionner le panneau latéral" />}
 
-        {/* Split Editor + PDF Pane */}
         <div ref={splitContainerRef} className="flex-1 flex min-w-0 h-full">
-          {/* Center: CodeMirror or Binary Asset Preview */}
-          <div
+          {/* Éditeur ou aperçu d'un fichier binaire */}
+          <section
+            aria-label="Éditeur LaTeX"
             style={{ width: `${editorRatio * 100}%` }}
-            className="h-full flex flex-col min-w-0 border-r border-zinc-800"
+            className="h-full flex flex-col min-w-0 bg-surface-container-lowest"
           >
             {!activeFile ? (
-              <div className="flex-1 flex items-center justify-center text-xs text-zinc-500">
+              <div className="flex-1 flex items-center justify-center text-body-sm text-on-surface-variant bg-surface-container-lowest">
                 Sélectionne un fichier dans l'arborescence.
               </div>
             ) : activeFile.isBinary ? (
-              <div className="flex-1 flex flex-col items-center justify-center p-8 bg-zinc-950 gap-4 overflow-auto">
+              <div className="flex-1 flex flex-col items-center justify-center p-gutter-xl bg-surface-container-lowest gap-4 overflow-auto">
                 {activeFile.mimeType.startsWith('image/') ? (
                   <img
                     src={api.projects.rawUrl(projectId, activeFile.path)}
                     alt={activeFile.path}
-                    className="max-w-full max-h-[70vh] rounded-lg border border-zinc-800 shadow-xl object-contain bg-zinc-900/50 p-2"
+                    className="max-w-full max-h-[70vh] rounded-lg border border-outline-variant object-contain bg-surface-container-low p-2"
                   />
                 ) : (
-                  <div className="text-xs text-zinc-400">
+                  <div className="text-body-sm text-on-surface-variant tabular-nums">
                     Fichier binaire ({activeFile.mimeType}) — {Math.round(activeFile.size / 1024)} Ko
                   </div>
                 )}
-                <p className="text-xs font-mono text-zinc-500">
+                <p className="text-body-sm text-on-surface-variant">
                   Utilisable dans LaTeX via{' '}
-                  <code className="text-indigo-300">
+                  <code className="font-mono text-code-sm text-primary-text">
                     \includegraphics&#123;{activeFile.path}&#125;
                   </code>
                 </p>
@@ -734,21 +726,20 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ projectId, onBack 
                   void runCompilation();
                 }}
                 onForwardSyncShortcut={(ln) => handleForwardSync(ln)}
+                onCursorChange={(line, col) => setCursor({ line, col })}
               />
             )}
-          </div>
+            {activeFile && !activeFile.isBinary && (
+              <div className="px-gutter-md py-gutter-xs flex items-center justify-end bg-surface-container-lowest font-mono text-code-sm font-normal text-outline tabular-nums shrink-0">
+                Ln {cursor.line}, Col {cursor.col}
+              </div>
+            )}
+          </section>
 
-          {/* Drag divider */}
-          <div
-            onMouseDown={startSplitResize}
-            className="w-1 bg-zinc-900 hover:bg-indigo-500/60 cursor-col-resize transition shrink-0"
-          />
+          <ResizeHandle onMouseDown={startSplitResize} label="Redimensionner l'éditeur et l'aperçu" />
 
-          {/* Right: Live PDF.js Viewer + Collapsible Diagnostics */}
-          <div
-            style={{ width: `${(1 - editorRatio) * 100}%` }}
-            className="h-full flex flex-col min-w-0"
-          >
+          {/* Aperçu PDF + diagnostics */}
+          <div style={{ width: `${(1 - editorRatio) * 100}%` }} className="h-full flex flex-col min-w-0">
             <div className="flex-1 min-h-0">
               <PdfPreviewPane
                 pdfBytes={pdfBytes}
@@ -771,5 +762,70 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ projectId, onBack 
         </div>
       </div>
     </div>
+  );
+};
+
+/** Poignée de redimensionnement verticale (zone de saisie de 5 px, trait de 1 px). */
+const ResizeHandle: React.FC<{ onMouseDown: (e: React.MouseEvent) => void; label: string }> = ({
+  onMouseDown,
+  label,
+}) => (
+  <div
+    role="separator"
+    aria-orientation="vertical"
+    aria-label={label}
+    onMouseDown={onMouseDown}
+    className="group relative w-px shrink-0 bg-outline-variant cursor-col-resize"
+  >
+    <span className="absolute inset-y-0 -left-0.5 -right-0.5 z-10 group-hover:bg-primary transition-colors duration-100" />
+  </div>
+);
+
+/** Statut compact du moteur : durée de la dernière compilation, ou étape en cours. */
+const CompileStatus: React.FC<{ status: WasmStatus; durationMs: number | null }> = ({
+  status,
+  durationMs,
+}) => {
+  const base = 'hidden xl:inline-flex items-center gap-gutter-xs text-label-sm tabular-nums max-w-[240px]';
+  if (status.phase === 'missing-assets' || status.phase === 'error') {
+    return (
+      <span
+        title={status.message}
+        className={cx(base, 'h-6 px-gutter-sm rounded-sm bg-warning-container text-on-warning-container')}
+      >
+        <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+        <span className="truncate">{status.message}</span>
+      </span>
+    );
+  }
+  if (status.phase === 'compiling') {
+    return (
+      <span title={status.message} className={cx(base, 'text-on-surface-variant')}>
+        Compilation...
+      </span>
+    );
+  }
+  if (status.phase === 'downloading' || status.phase === 'checking') {
+    return (
+      <span title={status.message} className={cx(base, 'text-on-surface-variant')}>
+        <Spinner className="w-3 h-3" />
+        <span className="truncate">{status.message}</span>
+      </span>
+    );
+  }
+  if (status.phase === 'ready' && durationMs !== null) {
+    return (
+      <span title={status.message} className={cx(base, 'text-on-surface-variant')}>
+        {(durationMs / 1000).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} s
+      </span>
+    );
+  }
+  return (
+    <span
+      title={status.message}
+      className={cx(base, status.message === 'Erreur de compilation' ? 'text-error' : 'text-on-surface-variant')}
+    >
+      <span className="truncate">{status.message}</span>
+    </span>
   );
 };

@@ -17,10 +17,3 @@ export function quotaRatio(usedBytes: number, quotaBytes: number | null): number
   if (quotaBytes === null || quotaBytes <= 0) return null;
   return Math.min(1, usedBytes / quotaBytes);
 }
-
-/** Couleur de jauge : normale, attention au-delà de 80 %, critique au-delà de 95 %. */
-export function quotaBarColor(ratio: number): string {
-  if (ratio >= 0.95) return 'bg-red-500';
-  if (ratio >= 0.8) return 'bg-amber-400';
-  return 'bg-[#634BFF]';
-}

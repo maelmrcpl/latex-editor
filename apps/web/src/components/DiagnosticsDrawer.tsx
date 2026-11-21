@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { AlertCircle, AlertTriangle, ChevronDown, ChevronUp, Terminal } from 'lucide-react';
+import { ChevronDown, ChevronUp } from 'lucide-react';
 import type { DiagnosticItem } from '@prism-latex/shared';
+import { cx, Tabs } from './ui';
 
 interface DiagnosticsDrawerProps {
   diagnostics: DiagnosticItem[];
@@ -9,6 +10,8 @@ interface DiagnosticsDrawerProps {
   onToggle: () => void;
   onJumpToLocation: (file: string, line: number) => void;
 }
+
+const plural = (n: number, word: string) => `${n} ${word}${n > 1 ? 's' : ''}`;
 
 export const DiagnosticsDrawer: React.FC<DiagnosticsDrawerProps> = ({
   diagnostics,
@@ -23,108 +26,108 @@ export const DiagnosticsDrawer: React.FC<DiagnosticsDrawerProps> = ({
   const warnCount = diagnostics.filter((d) => d.severity === 'warning').length;
 
   return (
-    <div className="border-t border-zinc-800 bg-zinc-950 flex flex-col shrink-0">
-      {/* Header bar */}
-      <div
+    <section aria-label="Diagnostics LaTeX" className="bg-surface border-t border-outline-variant shrink-0">
+      {/* Barre toujours visible */}
+      <button
+        type="button"
         onClick={onToggle}
-        className="h-9 px-3 flex items-center justify-between bg-zinc-900/80 hover:bg-zinc-900 cursor-pointer select-none text-xs"
+        aria-expanded={open}
+        className="w-full flex items-center justify-between px-gutter-md py-gutter-sm hover:bg-surface-container transition-colors duration-100 ease-out"
       >
-        <div className="flex items-center gap-3">
-          <span className="font-medium text-zinc-300 flex items-center gap-1.5">
-            <Terminal className="w-3.5 h-3.5 text-zinc-400" />
-            Diagnostics LaTeX
-          </span>
-
+        <span className="flex items-center gap-gutter-md">
+          <span className="text-label-md text-on-surface-variant">Diagnostics LaTeX</span>
           <span
-            className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] ${
-              errorCount > 0 ? 'bg-red-500/20 text-red-300' : 'bg-zinc-800 text-zinc-400'
-            }`}
+            className={cx(
+              'text-label-sm tabular-nums',
+              errorCount > 0 ? 'text-error' : 'text-on-surface-variant'
+            )}
           >
-            <AlertCircle className="w-3 h-3" />
-            {errorCount}
+            {plural(errorCount, 'erreur')}
           </span>
-
           <span
-            className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] ${
-              warnCount > 0 ? 'bg-amber-500/20 text-amber-300' : 'bg-zinc-800 text-zinc-400'
-            }`}
+            className={cx(
+              'text-label-sm tabular-nums',
+              warnCount > 0 ? 'text-warning' : 'text-on-surface-variant'
+            )}
           >
-            <AlertTriangle className="w-3 h-3" />
-            {warnCount}
+            {plural(warnCount, 'avertissement')}
           </span>
-        </div>
+        </span>
+        {open ? (
+          <ChevronDown className="w-[18px] h-[18px] text-on-surface-variant" />
+        ) : (
+          <ChevronUp className="w-[18px] h-[18px] text-on-surface-variant" />
+        )}
+      </button>
 
-        <div className="flex items-center gap-2">
-          {open && (
-            <div className="flex items-center gap-1 mr-2" onClick={(e) => e.stopPropagation()}>
-              <button
-                onClick={() => setTab('problems')}
-                className={`px-2 py-0.5 rounded text-[11px] cursor-pointer ${
-                  tab === 'problems'
-                    ? 'bg-indigo-600 text-white'
-                    : 'text-zinc-400 hover:bg-zinc-800'
-                }`}
-              >
-                Problèmes ({diagnostics.length})
-              </button>
-              <button
-                onClick={() => setTab('raw')}
-                className={`px-2 py-0.5 rounded text-[11px] cursor-pointer ${
-                  tab === 'raw' ? 'bg-indigo-600 text-white' : 'text-zinc-400 hover:bg-zinc-800'
-                }`}
-              >
-                Log complet
-              </button>
+      {/* Contenu repliable (220 ms à l'ouverture, 150 ms à la fermeture) */}
+      <div
+        className={cx(
+          'grid transition-[grid-template-rows]',
+          open ? 'grid-rows-[1fr] duration-[220ms] ease-enter' : 'grid-rows-[0fr] duration-150 ease-exit'
+        )}
+        aria-hidden={!open}
+        inert={!open}
+      >
+        <div className="min-h-0 overflow-hidden">
+          <div className="border-t border-outline-variant">
+            <Tabs
+              ariaLabel="Onglets diagnostics"
+              className="px-gutter-md border-b border-outline-variant"
+              value={tab}
+              onChange={setTab}
+              items={[
+                { id: 'problems', label: `Problèmes (${diagnostics.length})` },
+                { id: 'raw', label: 'Log complet' },
+              ]}
+            />
+
+            <div className="h-48 overflow-y-auto">
+              {tab === 'problems' ? (
+                diagnostics.length === 0 ? (
+                  <p className="p-gutter-md text-body-sm text-on-surface-variant text-center">
+                    Aucune erreur ni avertissement détecté lors de la dernière compilation.
+                  </p>
+                ) : (
+                  <ul className="p-gutter-sm flex flex-col gap-px">
+                    {diagnostics.map((d, idx) => (
+                      <li key={idx}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (d.line) onJumpToLocation(d.file, d.line);
+                          }}
+                          title={d.message}
+                          className="w-full flex items-center justify-between gap-gutter-sm px-gutter-sm py-gutter-xs rounded-sm text-left hover:bg-surface-container transition-colors duration-100"
+                        >
+                          <span className="flex items-center gap-gutter-sm min-w-0">
+                            <span
+                              className={cx(
+                                'w-1.5 h-1.5 rounded-full shrink-0',
+                                d.severity === 'error' ? 'bg-error' : d.severity === 'warning' ? 'bg-warning' : 'bg-outline'
+                              )}
+                              aria-label={d.severity === 'error' ? 'Erreur' : 'Avertissement'}
+                            />
+                            <span className="text-body-sm text-on-surface truncate">{d.message}</span>
+                          </span>
+                          <span className="font-mono text-code-sm text-primary-text shrink-0 tabular-nums">
+                            {d.file}
+                            {d.line ? `:${d.line}` : ''}
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )
+              ) : (
+                <pre className="min-h-full p-gutter-sm bg-surface-container-lowest font-mono text-code-sm font-normal text-on-surface-variant whitespace-pre-wrap break-words">
+                  {rawLog || 'Aucun log disponible.'}
+                </pre>
+              )}
             </div>
-          )}
-          {open ? (
-            <ChevronDown className="w-4 h-4 text-zinc-400" />
-          ) : (
-            <ChevronUp className="w-4 h-4 text-zinc-400" />
-          )}
+          </div>
         </div>
       </div>
-
-      {open && (
-        <div className="h-48 overflow-y-auto bg-zinc-950 text-xs">
-          {tab === 'problems' ? (
-            diagnostics.length === 0 ? (
-              <div className="p-4 text-zinc-500 text-center">
-                Aucune erreur ni avertissement détecté lors de la dernière compilation.
-              </div>
-            ) : (
-              <ul className="divide-y divide-zinc-900">
-                {diagnostics.map((d, idx) => (
-                  <li
-                    key={idx}
-                    onClick={() => {
-                      if (d.line) onJumpToLocation(d.file, d.line);
-                    }}
-                    className="px-3 py-2 hover:bg-zinc-900/70 flex items-start gap-2.5 cursor-pointer"
-                  >
-                    {d.severity === 'error' ? (
-                      <AlertCircle className="w-3.5 h-3.5 text-red-400 shrink-0 mt-0.5" />
-                    ) : (
-                      <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
-                    )}
-                    <div className="min-w-0 flex-1">
-                      <p className="text-zinc-200 break-words">{d.message}</p>
-                      <span className="text-[11px] font-mono text-zinc-500">
-                        {d.file}
-                        {d.line ? `:${d.line}` : ''}
-                      </span>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )
-          ) : (
-            <pre className="p-3 font-mono text-[11px] text-zinc-400 whitespace-pre-wrap break-words">
-              {rawLog || 'Aucun log disponible.'}
-            </pre>
-          )}
-        </div>
-      )}
-    </div>
+    </section>
   );
 };

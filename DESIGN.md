@@ -1,245 +1,292 @@
-# SynTeX — Design system
-
-État actuel de l'interface (`apps/web`), relevé dans le code. Ce document décrit ce qui **existe**,
-pas une cible : les incohérences connues sont listées à la fin.
-
-- **Stack** : React 19 + Tailwind CSS v4 (`@import "tailwindcss"`, aucune config de thème personnalisée)
-- **Icônes** : [lucide-react](https://lucide.dev)
-- **Thème** : sombre uniquement (`<html class="dark">`, fonds `zinc-950`). Pas de thème clair.
-- **Langue de l'interface** : français, tutoiement (« Connecte-toi », « Crée ton premier article »)
-
+---
+name: "SynTeX — Atelier Typographique"
+description: "Système de design éditorial et technique pour SynTeX, l'éditeur LaTeX collaboratif auto-hébergé avec compilation WebAssembly."
 ---
 
-## 1. Marque
+## Overview
 
-| Élément | Valeur |
-|---|---|
-| Nom | **SynTeX** — « Syn » en blanc, « TeX » en violet de marque |
-| Slogan | « L'éditeur LaTeX collaboratif » |
-| Violet de marque | `#634BFF` (texte « TeX », survol des boutons principaux) |
-| Violet profond | `#5236FF` (boutons principaux, halos, ombres) |
-| Assets | `public/brand/syntex-mark.png`, `syntex-icon.png`, `syntex-banner-light.jpg`, `syntex-stacked-light.jpg`, `public/favicon.png` |
+**SynTeX — Atelier Typographique** allie la rigueur de l'édition scientifique à la précision d'un environnement d'écriture sobre et moderne. Conçu pour les chercheurs, doctorants et ingénieurs francophones, l'interface adopte par défaut un **mode sombre charbon** (`#0C0C0E` / `#131316`) pensé pour de longues sessions dans l'éditeur LaTeX.
 
-Composant unique : `SynTeXLogo` (`components/SynTeXLogo.tsx`), 4 variantes :
+Le style s'inscrit dans une approche **Minimaliste / Technique** : surfaces neutres graduées, bordures fines (`#27272D`), typographie sans-serif géométrique et un accent **bleu indigo mesuré** (`#4E5FE3`) réservé aux actions principales et repères actifs.
 
-| Variante | Usage | Taille du logo | Mot-symbole |
-|---|---|---|---|
-| `full` | En-tête du tableau de bord et du panneau admin | 36 px (`w-9`) + ombre violette | `text-lg font-extrabold` |
-| `compact` | En-tête de l'éditeur | 24 px (`w-6`) | `text-sm font-extrabold` |
-| `stacked` | Écrans de connexion / attente | 64 px (`w-16`) + ombre violette | `text-2xl font-extrabold` |
-| `icon` | Badge d'application | 32 px, `rounded-lg` | — |
+## Colors
 
-Ombre du logo : `drop-shadow-[0_2px_12px_rgba(82,54,255,0.3)]` (full), `…0_4px_20px…0.35` (stacked).
+La palette sombre repose sur des neutres charbon/zinc (`#0C0C0E` pour l'éditeur, `#131316` pour les panneaux, `#1B1B1F` pour les éléments surélevés) associés à un accent bleu indigo sobre (`#4E5FE3` avec texte blanc `#FFFFFF` sur les boutons principaux, et `#9AA8FF` pour les repères textuels). Les teintes sémantiques (`success`, `warning`, `error`) restent discrètes et réservées aux états de compilation.
 
----
+```yaml
+colors:
+  light:
+    primary: "#3B49DF"
+    on-primary: "#FFFFFF"
+    primary-container: "#E0E4FF"
+    on-primary-container: "#1D2142"
+    secondary: "#52525B"
+    on-secondary: "#FFFFFF"
+    secondary-container: "#E4E4E7"
+    on-secondary-container: "#18181B"
+    tertiary: "#475569"
+    on-tertiary: "#FFFFFF"
+    tertiary-container: "#E2E8F0"
+    on-tertiary-container: "#1E293B"
+    error: "#DC2626"
+    on-error: "#FFFFFF"
+    error-container: "#FEE2E2"
+    on-error-container: "#7F1D1D"
+    background: "#FAFAFA"
+    on-background: "#18181B"
+    surface: "#FAFAFA"
+    surface-dim: "#E4E4E7"
+    surface-bright: "#FFFFFF"
+    surface-container-lowest: "#FFFFFF"
+    surface-container-low: "#F4F4F5"
+    surface-container: "#E4E4E7"
+    surface-container-high: "#D4D4D8"
+    surface-container-highest: "#C4C4CC"
+    on-surface: "#18181B"
+    surface-variant: "#E4E4E7"
+    on-surface-variant: "#52525B"
+    outline: "#71717A"
+    outline-variant: "#D4D4D8"
+    inverse-surface: "#18181B"
+    inverse-on-surface: "#F4F4F5"
+    inverse-primary: "#9AA8FF"
+    success: "#15803D"
+    on-success: "#FFFFFF"
+    success-container: "#DCFCE7"
+    on-success-container: "#14532D"
+    warning: "#B45309"
+    on-warning: "#FFFFFF"
+    warning-container: "#FEF3C7"
+    on-warning-container: "#78350F"
+  dark:
+    primary: "#4E5FE3"
+    on-primary: "#FFFFFF"
+    primary-container: "#1D2142"
+    on-primary-container: "#9AA8FF"
+    secondary: "#A1A1AA"
+    on-secondary: "#131316"
+    secondary-container: "#27272D"
+    on-secondary-container: "#E4E4E7"
+    tertiary: "#9AA8FF"
+    on-tertiary: "#131316"
+    tertiary-container: "#1D2142"
+    on-tertiary-container: "#E4E4E7"
+    error: "#F87171"
+    on-error: "#450A0A"
+    error-container: "#7F1D1D"
+    on-error-container: "#FEE2E2"
+    background: "#0C0C0E"
+    on-background: "#E4E4E7"
+    surface: "#131316"
+    surface-dim: "#0C0C0E"
+    surface-bright: "#1B1B1F"
+    surface-container-lowest: "#0C0C0E"
+    surface-container-low: "#131316"
+    surface-container: "#1B1B1F"
+    surface-container-high: "#222228"
+    surface-container-highest: "#2A2A32"
+    on-surface: "#E4E4E7"
+    surface-variant: "#27272D"
+    on-surface-variant: "#A1A1AA"
+    outline: "#71717A"
+    outline-variant: "#27272D"
+    inverse-surface: "#E4E4E7"
+    inverse-on-surface: "#18181B"
+    inverse-primary: "#3B49DF"
+    success: "#6EE7B7"
+    on-success: "#064E3B"
+    success-container: "#064E3B"
+    on-success-container: "#A7F3D0"
+    warning: "#FBBF24"
+    on-warning: "#451A03"
+    warning-container: "#451A03"
+    on-warning-container: "#FDE68A"
+```
 
-## 2. Couleurs
+## Typography
 
-### Neutres (palette Tailwind `zinc`)
+La hiérarchie associe **Afacad Flux** (géométrique, moderne) pour les titres et en-têtes, **Instrument Sans** (néo-grotesque, très lisible) pour les libellés d'interface et textes courants, et **Source Code Pro** pour l'éditeur LaTeX, les clés BibTeX, les emplacements `fichier:ligne` et les raccourcis clavier. Les données chiffrées et compteurs utilisent systématiquement `tabular-nums`.
 
-| Rôle | Classe | Hex |
-|---|---|---|
-| Fond de page, éditeur | `bg-zinc-950` | `#09090b` |
-| Surfaces (cartes, panneaux, modales) | `bg-zinc-900`, `bg-zinc-900/60`, `/80` | `#18181b` |
-| Bordures, séparateurs, survols | `border-zinc-800`, `hover:bg-zinc-800` | `#27272a` |
-| Bordures secondaires | `zinc-700` | `#3f3f46` |
-| Texte désactivé / numéros de ligne | `text-zinc-600` | `#52525b` |
-| Texte tertiaire, métadonnées | `text-zinc-500` | `#71717a` |
-| Texte secondaire | `text-zinc-400` | `#a1a1aa` |
-| Texte de contrôle | `text-zinc-300` | `#d4d4d8` |
-| Texte principal | `text-zinc-100` / `zinc-200` | `#f4f4f5` / `#e4e4e7` |
-| Titres | `text-white` | `#ffffff` |
+```yaml
+typography:
+  display-lg:
+    fontFamily: "Afacad Flux"
+    fontSize: 36px
+    fontWeight: 600
+    lineHeight: 44px
+    letterSpacing: -0.5px
+  display-lg-mobile:
+    fontFamily: "Afacad Flux"
+    fontSize: 28px
+    fontWeight: 600
+    lineHeight: 34px
+    letterSpacing: -0.25px
+  headline-lg:
+    fontFamily: "Afacad Flux"
+    fontSize: 24px
+    fontWeight: 600
+    lineHeight: 30px
+    letterSpacing: -0.25px
+  headline-md:
+    fontFamily: "Afacad Flux"
+    fontSize: 20px
+    fontWeight: 600
+    lineHeight: 26px
+    letterSpacing: -0.15px
+  title-lg:
+    fontFamily: "Afacad Flux"
+    fontSize: 16px
+    fontWeight: 600
+    lineHeight: 22px
+    letterSpacing: 0px
+  title-md:
+    fontFamily: "Instrument Sans"
+    fontSize: 14px
+    fontWeight: 600
+    lineHeight: 20px
+    letterSpacing: 0.1px
+  body-lg:
+    fontFamily: "Instrument Sans"
+    fontSize: 15px
+    fontWeight: 400
+    lineHeight: 22px
+    letterSpacing: 0px
+  body-md:
+    fontFamily: "Instrument Sans"
+    fontSize: 13px
+    fontWeight: 400
+    lineHeight: 20px
+    letterSpacing: 0px
+  body-sm:
+    fontFamily: "Instrument Sans"
+    fontSize: 12px
+    fontWeight: 400
+    lineHeight: 16px
+    letterSpacing: 0.1px
+  label-lg:
+    fontFamily: "Instrument Sans"
+    fontSize: 13px
+    fontWeight: 600
+    lineHeight: 18px
+    letterSpacing: 0.1px
+  label-md:
+    fontFamily: "Instrument Sans"
+    fontSize: 12px
+    fontWeight: 500
+    lineHeight: 16px
+    letterSpacing: 0.2px
+  label-sm:
+    fontFamily: "Instrument Sans"
+    fontSize: 11px
+    fontWeight: 500
+    lineHeight: 14px
+    letterSpacing: 0.3px
+  code-md:
+    fontFamily: "Source Code Pro"
+    fontSize: 13px
+    fontWeight: 400
+    lineHeight: 21px
+    letterSpacing: 0px
+  code-sm:
+    fontFamily: "Source Code Pro"
+    fontSize: 11px
+    fontWeight: 500
+    lineHeight: 16px
+    letterSpacing: 0px
+```
 
-Barre de défilement globale : fine, `rgba(113, 113, 122, 0.4)` sur fond transparent.
+## Layout & Spacing
 
-### Accents
+L'application repose sur une grille fluide à pas strict de **4 px / 8 px** :
+- **Espace de travail projet** : pleine largeur et hauteur (`min-h-screen`), organisé en 3 zones redimensionnables côte à côte (panneau latéral 190–420 px, éditeur central, aperçu PDF + tiroir de diagnostics en bas à droite) sous une barre supérieure compacte de 48 px.
+- **Tableau de bord et administration** : grille fluide centrée (`max-w-6xl`, gouttières de 16 px et marges de page de 24 px) avec cartes de projet alignées sur 3 colonnes sur grand écran, 2 sur tablette et 1 sur mobile.
+- **Écrans d'authentification** : carte unique centrée verticalement et horizontalement.
 
-| Rôle | Couleur |
-|---|---|
-| Action principale (marque) | `bg-[#5236FF] hover:bg-[#634BFF]`, ombre `shadow-[#5236FF]/25` |
-| Action principale (secondaire / historique) | `bg-indigo-600 hover:bg-indigo-500` |
-| Sélection, focus, éléments actifs | `indigo-500` (bordures `focus:border-indigo-500`, fond `indigo-500/15`) |
-| Texte d'accent (fichier actif, liens) | `indigo-300` / `indigo-400` |
-| Survol d'une carte projet | `hover:border-indigo-500/50`, titre `group-hover:text-indigo-300` |
+```yaml
+spacing:
+  gutter-xs: 4px
+  gutter-sm: 8px
+  gutter-md: 16px
+  gutter-lg: 24px
+  gutter-xl: 32px
+  section: 48px
+  page-margin: 24px
+```
 
-### États et sémantique
+## Elevation & Depth
 
-| Sens | Texte | Fond | Bordure | Exemples |
-|---|---|---|---|---|
-| Succès / validé | `emerald-300/400` | `emerald-500/15` | `emerald-500/30` | « Validé », « Sauvegardé », bouton « Valider » (`bg-emerald-600`) |
-| Attention / en attente | `amber-300/400` | `amber-500/15` | `amber-500/30` | « En attente », « ● Modifié », avertissements LaTeX, propriétaire d'un projet |
-| Erreur / danger | `red-200/300/400` | `red-500/10` | `red-500/30` | Bandeaux d'erreur, « Non sauvegardé », « Refusé », survol de suppression (`hover:bg-red-500/15`) |
-| Admin | `amber-400` | — | — | Icône couronne (`Crown`) |
+La hiérarchie visuelle privilégie les **couches tonales** (`surface-container-low` pour le panneau latéral, `surface-container-lowest` pour la zone d'édition et la feuille PDF, `surface-container` pour les barres d'outils) associées à des **bordures fines à faible contraste** (`outline-variant`). Les ombres portées restent très discrètes et diffuses, réservées uniquement aux modales, menus contextuels et à la feuille PDF simulée dans l'aperçu. Aucun effet de flou d'arrière-plan (`backdrop-blur`) n'est utilisé.
 
-### Jauges de stockage
+## Shapes
 
-| Remplissage | Couleur |
-|---|---|
-| < 80 % | `bg-[#634BFF]` |
-| 80–95 % | `bg-amber-400` |
-| ≥ 95 % | `bg-red-500` |
+Les rayons d'arrondi sont mesurés et techniques : `4px` pour les badges, puces de statut et boutons compacts de barre d'outils ; `8px` par défaut pour les boutons standards, champs de saisie et éléments d'arborescence ; `12px` pour les cartes de projet et panneaux ; `16px` pour les modales.
 
-Piste : `bg-zinc-800`, hauteur `h-1.5` (tableau de bord) ou `h-1` (panneau admin), `rounded-full`.
-Logique dans `lib/format.ts` (`quotaRatio`, `quotaBarColor`).
+```yaml
+rounded:
+  sm: 4px
+  DEFAULT: 8px
+  md: 12px
+  lg: 16px
+  xl: 24px
+  full: 9999px
+```
 
-### Coloration syntaxique LaTeX (`lib/latexLanguage.ts`)
+## Motion & Micro-interaction
 
-| Élément | Couleur | Style |
-|---|---|---|
-| Commentaires | `#71717a` | italique |
-| Mots-clés (`\begin`, `\end`…) | `#a78bfa` | 600 |
-| Titres (`\section`…) | `#38bdf8` | 700 |
-| Atomes | `#fbbf24` | |
-| Noms de balise / commandes | `#818cf8` | |
-| Opérateurs / maths | `#34d399` | |
-| Variables | `#6ee7b7` | |
-| Nombres | `#f472b6` | |
-| Définitions | `#c084fc` | 600 |
-| Accolades | `#a1a1aa` | |
-| Crochets | `#94a3b8` | |
+Les transitions sont vives, sobres et fonctionnelles : retour immédiat (`100ms`) sur les boutons, onglets et éléments d'arborescence ; ouverture/fermeture fluide (`220ms`) pour le tiroir de diagnostics et le panneau latéral. Aucune animation décorative ou en boucle.
 
-Thème de l'éditeur : fond `#09090b`, texte `#e4e4e7`, curseur `#818cf8`, sélection `rgba(99,102,241,0.25)`,
-gouttière `#09090b` / texte `#52525b` / bordure `#18181b`, ligne active `rgba(39,39,42,0.35)`,
-infobulles `#18181b` bordure `#27272a` ombre `0 10px 25px rgba(0,0,0,0.5)`.
+```yaml
+motion:
+  state-change:
+    duration: 100ms
+    delay: 0ms
+    timingFunction: ease-out
+  surface-enter:
+    duration: 220ms
+    delay: 0ms
+    timingFunction: cubic-bezier(0.2, 0, 0, 1)
+  surface-exit:
+    duration: 150ms
+    delay: 0ms
+    timingFunction: cubic-bezier(0.3, 0, 1, 1)
+```
 
----
+## Voice & Content Strategy
 
-## 3. Typographie
+- **Ton** : direct, précis, confraternel (tutoiement sobre cohérent avec « Stockage de tes projets », « Crée ton premier article »), sans jargon superflu ni superlatifs marketing.
+- **Casse** : casse de phrase (« Nouveau projet », « Diagnostics LaTeX ») partout, y compris dans les boutons et titres d'onglets.
+- **Libellés d'action** : verbes à l'infinitif indiquant le résultat (« Compiler », « Sauvegarder », « Exporter en .zip », « Définir comme root »).
+- **États** : messages clairs et actionnables en cas d'erreur, compteurs avec `tabular-nums`, unités françaises (`Mo`, `Ko`, `s`).
 
-- **Interface** : police sans-serif système par défaut de Tailwind (aucune webfont chargée).
-- **Code** : `"JetBrains Mono", "Fira Code", "Cascadia Code", Consolas, monospace`, 13,5 px dans l'éditeur.
-  Les polices ne sont pas embarquées : la première installée sur le poste est utilisée.
-- **Monospace dans l'UI** (`font-mono`) : chemins de fichiers, moteur de compilation, codes.
+## Components
 
-| Usage | Taille | Graisse |
-|---|---|---|
-| Titre de page (« Mes Projets LaTeX », « Utilisateurs ») | `text-2xl` | `font-semibold tracking-tight` |
-| Titre de modale | `text-lg` | `font-semibold` |
-| Corps, champs, nom de projet | `text-sm` | normal / `font-medium` |
-| Texte d'interface courant (boutons, tableaux, menus) | `text-xs` (12 px) — **le plus utilisé** | `font-medium` pour les boutons |
-| Métadonnées, aides, légendes | `text-[11px]` | normal |
-| Badges, étiquettes (`ROOT`, moteur) | `text-[10px]`, souvent `uppercase font-mono` | normal |
+Les composants partagés sont implémentés en React dans `apps/web/src/components/ui/` :
 
-Chiffres alignés (`tabular-nums`) pour les tailles de stockage.
+- **Badge** → `Badge` (étiquettes numériques, moteur, `root`, sources), `StatusDot` (pastille de statut)
+- **Button** → `Button` (`primary`, `secondary`, `ghost`, `danger`, `success` ; tailles `sm` / `md` / `lg`), `IconButton`
+- **Card** → carte « Dernière session » et cartes de la bibliothèque (`ProjectDashboard.tsx`), résultats de citation (`SidebarExplorer.tsx`), carte d'authentification (`AuthCard.tsx`)
+- **Cadre applicatif** → `AppShell` : rail latéral (marque, « Nouveau projet », navigation, stockage, compte) des pages Projets et Utilisateurs
+- **Tabs** → `Tabs` (onglets horizontaux, avec ou sans icône)
+- **Formulaires** → `Field`, `inputClass`
+- **Retours d'état** → `Alert`, `Spinner`, `LoadingScreen`, `Meter` (jauge de stockage), `Kbd`, `Avatar`
+- **Modales** → `Modal`, et `useDialogs()` (`confirm` / `prompt`) qui remplace `window.confirm` / `window.prompt`
+- **Thème** → `ThemeToggle` + `lib/theme.ts` (sombre par défaut, clair mémorisé dans le navigateur)
 
----
+## Implementation
 
-## 4. Espacement, formes, profondeur
-
-### Rayons
-
-| Rayon | Usage |
-|---|---|
-| `rounded` (4 px) | Petits boutons-icônes, badges de code |
-| `rounded-lg` (8 px) | **Boutons standards**, boutons d'en-tête, éléments de liste |
-| `rounded-xl` (12 px) | Boutons principaux, champs de formulaire, alertes, choix de modèle |
-| `rounded-2xl` (16 px) | Cartes projet, modales, carte de connexion, tableau admin |
-| `rounded-full` | Avatars, pastilles de statut, jauges, halos |
-
-### Mise en page
-
-- Pages « application » (tableau de bord, admin) : `max-w-6xl mx-auto px-6`, contenu `py-10`.
-- En-tête de page : `h-16`, `sticky top-0`, `border-b border-zinc-900`, `bg-zinc-950/80 backdrop-blur`.
-- En-tête de l'éditeur : `h-12 px-3`, `border-b border-zinc-800`.
-- En-têtes de panneaux (PDF, diagnostics) : `h-10 px-3`.
-- Grille des projets : 1 / 2 / 3 colonnes (`md:grid-cols-2 lg:grid-cols-3`), `gap-4`.
-- Éditeur : barre latérale redimensionnable (190–420 px, défaut 250), séparation éditeur/PDF
-  redimensionnable (25–75 %, défaut 50 %).
-
-### Profondeur
-
-- Cartes : bordure plutôt qu'ombre (`border-zinc-800/80`).
-- Modales et carte de connexion : `shadow-2xl`, voile `bg-black/70 backdrop-blur-sm`.
-- Carte de connexion : verre dépoli `bg-zinc-900/80 backdrop-blur-xl` + halo de marque
-  `bg-[#5236FF]/20 blur-[130px]` derrière.
-- Bouton principal de marque : `shadow-lg shadow-[#5236FF]/25`.
-
----
-
-## 5. Composants
-
-### Boutons
-
-| Type | Classes |
-|---|---|
-| Principal (marque) | `px-4 py-2.5 rounded-xl bg-[#5236FF] hover:bg-[#634BFF] text-sm font-medium text-white shadow-lg shadow-[#5236FF]/25` |
-| Principal compact (« Compiler ») | `px-3.5 py-1.5 rounded-lg bg-[#5236FF] hover:bg-[#634BFF] text-xs text-white` |
-| Principal (modale, recherche) | `px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-medium text-white` |
-| Secondaire (en-tête) | `text-xs px-3 py-1.5 rounded-lg border border-zinc-800 hover:bg-zinc-900 text-zinc-300` + icône 14 px |
-| Fantôme | `px-4 py-2 rounded-xl text-xs text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800` |
-| Icône | `p-1.5 rounded-lg hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200` |
-| Destructif (icône) | `hover:bg-red-500/15 hover:text-red-400` |
-| Validation (admin) | `bg-emerald-600 hover:bg-emerald-500 text-white` |
-| Connexion Google | `bg-white hover:bg-zinc-100 text-zinc-900 rounded-xl shadow-lg` + logo Google officiel |
-
-Tous les boutons : `transition`, `cursor-pointer`, `disabled:opacity-50`.
-
-### Champs de formulaire
-
-`w-full px-3.5 py-2 rounded-xl bg-zinc-950 border border-zinc-800 text-sm text-zinc-100 focus:outline-none focus:border-indigo-500`
-Libellé : `text-xs font-medium text-zinc-400 mb-1`.
-
-### Cartes projet
-
-`bg-zinc-900/60 hover:bg-zinc-900 border border-zinc-800/80 hover:border-indigo-500/50 rounded-2xl p-5`,
-pied séparé par `border-t border-zinc-800/70` (date, nombre de fichiers, actions).
-
-### Pastilles de statut
-
-`text-[11px] px-2 py-0.5 rounded-full border` + couleurs de la section « États »
-(En attente / Validé / Refusé).
-
-### Alertes et bandeaux
-
-- Alerte en bloc : `px-3.5 py-2.5 rounded-xl bg-red-500/10 border border-red-500/30 text-xs text-red-300`.
-- Bandeau d'éditeur (pleine largeur, sous l'en-tête) : `px-4 py-2 border-b border-red-500/30 bg-red-500/10 text-xs text-red-200`,
-  icône `AlertTriangle`, bouton de fermeture `X`, `role="alert"`.
-
-### Indicateur de sauvegarde (en-tête de l'éditeur)
-
-| État | Rendu |
-|---|---|
-| En cours | `Loader2` animé + « Sauvegarde... » |
-| Échec | `AlertTriangle` + « Non sauvegardé » en `red-400` |
-| Modifié | « ● Modifié » en `amber-400` |
-| À jour | `CheckCircle2` `emerald-500` + « Sauvegardé » |
-
-### Icônes
-
-- Taille standard : **14 px** (`w-3.5 h-3.5`) dans les boutons et listes ; 16 px (`w-4 h-4`) dans les boutons principaux ;
-  12 px (`w-3 h-3`) dans les indicateurs.
-- Couleur héritée du texte, ou couleur d'état.
-
-### Animations
-
-- `transition` sur tous les éléments interactifs.
-- `animate-spin` sur `Loader2` pour les chargements.
-- SyncTeX : surlignage `.synctex-highlight` (pulsation 2,1 s, `ease-out`, s'estompe) dans l'aperçu PDF.
-
----
-
-## 6. Ton et contenus
-
-- Tutoiement partout, phrases courtes.
-- Messages d'erreur : « <action> impossible : <raison du serveur> » (ex. « Sauvegarde impossible (tes modifications
-  restent dans l'éditeur) : Quota de stockage dépassé (498 Mo utilisés sur 500 Mo). »).
-- Tailles en unités françaises : o, Ko, Mo, Go, virgule décimale (`formatBytes` dans `lib/format.ts`).
-- Dates : `Intl.DateTimeFormat('fr-FR', { dateStyle: 'medium', timeStyle: 'short' })` → « 20 nov. 2026, 00:02 ».
-- Confirmations destructives via `window.confirm` avec le nom de l'élément (« Supprimer définitivement le projet "X" ? »).
-
----
-
-## 7. Incohérences connues
-
-1. **Deux couleurs d'action principale** : le violet de marque (`#5236FF`) sur « Nouveau Projet », « Compiler » et
-   l'écran d'attente, mais `indigo-600` sur « Créer et ouvrir », « Créer un projet », la recherche de citations et les
-   onglets des diagnostics. L'indigo Tailwind (`#4f46e5`) est proche mais pas identique au violet SynTeX.
-2. **Pas de tokens** : les couleurs de marque sont écrites en dur (`bg-[#5236FF]`, `text-[#634BFF]`) à plusieurs endroits
-   au lieu de variables de thème Tailwind (`@theme { --color-brand: … }`).
-3. **Badge « v1 • WASM Engine »** dans l'en-tête du tableau de bord : texte figé, sans lien avec la version réelle.
-4. **Polices de code non embarquées** : le rendu de l'éditeur dépend des polices installées sur le poste
-   (la CSP n'autorise que les polices servies par l'application).
-5. **Textes du modèle d'article en anglais** (« Research Paper », « This paper demonstrates… ») alors que l'interface
-   est en français.
-6. **Confirmations natives** (`window.confirm` / `window.prompt`) pour la création, le renommage et la suppression,
-   au lieu de modales dans le style de l'application.
+- **Tokens** : `apps/web/src/styles.css`. Les couleurs sont des variables CSS (`--sx-*`) redéfinies pour le thème clair
+  sous `:root[data-theme="light"]`, exposées à Tailwind v4 via `@theme inline` : `bg-surface-container-low`,
+  `text-on-surface-variant`, `border-outline-variant`, `bg-primary`, `text-primary-text` (repères textuels `#9AA8FF`)…
+  La palette Tailwind par défaut est désactivée (`--color-*: initial`) : seules les couleurs du système existent.
+- **Typographie** : utilitaires `text-display-lg`, `text-headline-md`, `text-title-lg`, `text-body-md`, `text-label-sm`,
+  `text-code-sm`… (taille, interligne, interlettrage et graisse). Ajouter `font-display` pour Afacad Flux (titres) ;
+  Instrument Sans est la police par défaut, `font-mono` = Source Code Pro. Polices auto-hébergées via `@fontsource-variable`
+  (la CSP n'autorise que les polices servies par l'application).
+- **Espacements** : `p-gutter-xs` … `p-gutter-xl`, `py-section`, `px-page-margin`.
+- **Rayons** (échelle Tailwind) : `rounded-sm` = 4 px, `rounded-lg` = 8 px, `rounded-xl` = 12 px, `rounded-2xl` = 16 px,
+  `rounded-3xl` = 24 px.
+- **Profondeur** : `shadow-overlay` (modales, menus, infobulles de l'éditeur), `shadow-sheet` (feuille PDF). Aucun flou.
+- **Mouvement** : `duration-100 ease-out` pour les changements d'état ; `animate-surface-enter`, `ease-enter` (220 ms) et
+  `ease-exit` (150 ms) pour le tiroir de diagnostics, le panneau latéral et les modales.
+- **Éditeur** : `lib/latexLanguage.ts` (`syntexEditorTheme`, `syntexHighlight`) lit les mêmes variables, y compris
+  la coloration syntaxique (`--sx-syntax-*`).

@@ -1,427 +1,580 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
 import {
+  ArrowRight,
   BookOpen,
-  Clock,
-  Download,
   FileCode2,
-  FolderPlus,
-  HardDrive,
-  LogOut,
+  FolderArchive,
   Presentation,
   ScrollText,
+  Search,
   Sparkles,
   Trash2,
-  Users,
+  UserRound,
 } from 'lucide-react';
-import type {
-  AuthUser,
-  CompilerEngine,
-  ProjectSummary,
-  ProjectTemplateId,
-  StorageUsage,
-} from '@prism-latex/shared';
+import type { AuthUser, CompilerEngine, ProjectSummary, ProjectTemplateId } from '@prism-latex/shared';
 import { api } from '../lib/api';
-import { formatBytes, quotaBarColor, quotaRatio } from '../lib/format';
-import { SynTeXLogo } from './SynTeXLogo';
+import { extractLatexExcerpt, type LatexExcerpt } from '../lib/latexExcerpt';
+import { AppShell } from './AppShell';
+import { Modal, useDialogs } from './ui/Dialog';
+import { Badge, Button, cx, Field, IconButton, inputClass, Kbd, Spinner } from './ui';
 
 interface ProjectDashboardProps {
   user: AuthUser;
   onOpenProject: (projectId: string) => void;
   onOpenAdmin: () => void;
   onLogout: () => void;
+  /** Ouvre la fenêtre « Nouveau projet » dès l'arrivée (demandé depuis une autre page) */
+  autoOpenCreate?: boolean;
+  onAutoOpenHandled?: () => void;
 }
 
 const TEMPLATES: Array<{
   id: ProjectTemplateId;
   title: string;
   subtitle: string;
-  icon: React.ReactNode;
+  Icon: React.ComponentType<{ className?: string }>;
 }> = [
   {
     id: 'article',
-    title: 'Article Scientifique',
+    title: 'Article scientifique',
     subtitle: 'Multi-fichiers, théorèmes AMS, équations & BibTeX',
-    icon: <Sparkles className="w-4 h-4 text-indigo-400" />,
+    Icon: Sparkles,
   },
   {
     id: 'report-fr',
-    title: 'Rapport / Mémoire (FR)',
+    title: 'Rapport / mémoire (FR)',
     subtitle: 'Chapitres séparés, table des matières & bibliographie',
-    icon: <BookOpen className="w-4 h-4 text-emerald-400" />,
+    Icon: BookOpen,
   },
   {
     id: 'beamer',
     title: 'Présentation Beamer 16:9',
     subtitle: 'Diaporama académique moderne avec blocs mathématiques',
-    icon: <Presentation className="w-4 h-4 text-amber-400" />,
+    Icon: Presentation,
   },
   {
     id: 'blank',
-    title: 'Document Minimal',
+    title: 'Document minimal',
     subtitle: 'Squelette article vierge prêt à écrire',
-    icon: <ScrollText className="w-4 h-4 text-zinc-400" />,
+    Icon: ScrollText,
   },
 ];
+
+const ENGINE_FILTERS: Array<{ id: 'all' | CompilerEngine; label: string }> = [
+  { id: 'all', label: 'Tous' },
+  { id: 'pdflatex', label: 'pdfLaTeX' },
+  { id: 'xelatex', label: 'XeLaTeX' },
+  { id: 'lualatex', label: 'LuaLaTeX' },
+];
+
+const dateTimeFormat = new Intl.DateTimeFormat('fr-FR', {
+  day: 'numeric',
+  month: 'short',
+  hour: '2-digit',
+  minute: '2-digit',
+});
+const shortDateFormat = new Intl.DateTimeFormat('fr-FR', { day: 'numeric', month: 'short' });
+const fullDateFormat = new Intl.DateTimeFormat('fr-FR', { dateStyle: 'full', timeStyle: 'short' });
+
+const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
 
 export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
   user,
   onOpenProject,
   onOpenAdmin,
   onLogout,
+  autoOpenCreate = false,
+  onAutoOpenHandled,
 }) => {
   const isAdmin = user.role === 'admin';
+  const dialogs = useDialogs();
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [loading, setLoading] = useState(true);
-  const [storage, setStorage] = useState<StorageUsage | null>(null);
-  const [showCreateModal, setShowCreateModal] = useState(false);
-
-  const [newName, setNewName] = useState('');
-  const [newDesc, setNewDesc] = useState('');
-  const [newTemplate, setNewTemplate] = useState<ProjectTemplateId>('article');
-  const [newCompiler, setNewCompiler] = useState<CompilerEngine>('pdflatex');
-  const [creating, setCreating] = useState(false);
-
-  const loadStorage = () => {
-    api.account
-      .storage()
-      .then(setStorage)
-      .catch(() => setStorage(null));
-  };
-
-  const loadProjects = async () => {
-    setLoading(true);
-    try {
-      const res = await api.projects.list();
-      setProjects(res.projects);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const [storageVersion, setStorageVersion] = useState(0);
+  const [showCreateModal, setShowCreateModal] = useState(autoOpenCreate);
+  const [query, setQuery] = useState('');
+  const [engine, setEngine] = useState<'all' | CompilerEngine>('all');
+  const searchRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
-    void loadProjects();
-    loadStorage();
+    if (autoOpenCreate) onAutoOpenHandled?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleCreate = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newName.trim()) return;
-    setCreating(true);
-    try {
-      const res = await api.projects.create({
-        name: newName.trim(),
-        description: newDesc.trim(),
-        template: newTemplate,
-        compiler: newCompiler,
+  useEffect(() => {
+    let active = true;
+    api.projects
+      .list()
+      .then((res) => {
+        if (active) setProjects([...res.projects].sort((a, b) => b.updatedAt - a.updatedAt));
+      })
+      .finally(() => {
+        if (active) setLoading(false);
       });
-      setShowCreateModal(false);
-      setNewName('');
-      setNewDesc('');
-      onOpenProject(res.project.id);
-    } finally {
-      setCreating(false);
-    }
-  };
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // Ctrl+K / ⌘K : rechercher
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        searchRef.current?.focus();
+        searchRef.current?.select();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  const filtering = query.trim() !== '' || engine !== 'all';
+  const latest = !filtering ? projects[0] : undefined;
+  const library = useMemo(() => {
+    const q = query.trim().toLocaleLowerCase('fr');
+    return projects.filter(
+      (p) =>
+        (engine === 'all' || p.compiler === engine) &&
+        (!q ||
+          p.name.toLocaleLowerCase('fr').includes(q) ||
+          p.description.toLocaleLowerCase('fr').includes(q) ||
+          (p.owner?.name ?? '').toLocaleLowerCase('fr').includes(q))
+    );
+  }, [projects, query, engine]);
+
+  const ownerOf = (p: ProjectSummary) =>
+    isAdmin && p.owner && p.owner.id !== user.id
+      ? { name: p.owner.name || p.owner.email, email: p.owner.email }
+      : null;
 
   const handleDelete = async (e: React.MouseEvent, project: ProjectSummary) => {
     e.stopPropagation();
-    if (!window.confirm(`Supprimer définitivement le projet "${project.name}" ?`)) {
-      return;
-    }
+    const ok = await dialogs.confirm({
+      title: 'Supprimer le projet ?',
+      message: (
+        <>
+          Le projet <strong className="text-on-surface">« {project.name} »</strong> et tous ses
+          fichiers seront supprimés définitivement.
+        </>
+      ),
+      confirmLabel: 'Supprimer',
+      tone: 'danger',
+    });
+    if (!ok) return;
     await api.projects.delete(project.id);
     setProjects((prev) => prev.filter((p) => p.id !== project.id));
-    loadStorage();
+    setStorageVersion((v) => v + 1);
   };
 
-  const formatDate = (ts: number) =>
-    new Intl.DateTimeFormat('fr-FR', {
-      dateStyle: 'medium',
-      timeStyle: 'short',
-    }).format(new Date(ts));
-
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100">
-      {/* Top bar */}
-      <header className="border-b border-zinc-900 bg-zinc-950/80 backdrop-blur sticky top-0 z-20">
-        <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3.5">
-            <SynTeXLogo variant="full" showTagline />
-            <span className="hidden sm:inline-block text-[11px] px-2 py-0.5 rounded-full bg-zinc-900 border border-zinc-800 text-zinc-400">
-              v1 • WASM Engine
-            </span>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <span className="hidden sm:flex items-center gap-2 text-xs text-zinc-400">
-              {user.avatarUrl && (
-                <img
-                  src={user.avatarUrl}
-                  alt=""
-                  referrerPolicy="no-referrer"
-                  className="w-6 h-6 rounded-full"
-                />
-              )}
-              <strong className="text-zinc-200 font-medium" title={user.email}>
-                {user.name}
-              </strong>
-            </span>
-            {isAdmin && (
-              <button
-                onClick={onOpenAdmin}
-                className="text-xs px-3 py-1.5 rounded-lg border border-zinc-800 hover:bg-zinc-900 text-zinc-300 flex items-center gap-1.5 transition cursor-pointer"
-              >
-                <Users className="w-3.5 h-3.5" />
-                Utilisateurs
-              </button>
-            )}
-            <button
-              onClick={onLogout}
-              className="text-xs px-3 py-1.5 rounded-lg border border-zinc-800 hover:bg-zinc-900 text-zinc-300 flex items-center gap-1.5 transition cursor-pointer"
-            >
-              <LogOut className="w-3.5 h-3.5" />
-              Déconnexion
-            </button>
-          </div>
-        </div>
-      </header>
-
-      <main className="max-w-6xl mx-auto px-6 py-10">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight text-white">
-              {isAdmin ? 'Tous les projets LaTeX' : 'Mes Projets LaTeX'}
+    <AppShell
+      user={user}
+      section="projects"
+      projectCount={loading ? undefined : projects.length}
+      storageVersion={storageVersion}
+      onNewProject={() => setShowCreateModal(true)}
+      onNavigate={(section) => {
+        if (section === 'users') onOpenAdmin();
+      }}
+      onLogout={onLogout}
+    >
+      <div className="flex flex-col gap-10">
+        <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-gutter-md">
+          <div className="flex flex-col gap-0.5">
+            <h1 className="font-display text-headline-lg text-on-surface">
+              {isAdmin ? 'Tous les manuscrits' : 'Vos manuscrits'}
             </h1>
-            {storage && <StorageMeter storage={storage} isAdmin={isAdmin} />}
+            <p className="text-body-sm text-on-surface-variant">
+              Reprendre une rédaction ou démarrer depuis un modèle LaTeX.
+            </p>
           </div>
 
-          <button
-            onClick={() => setShowCreateModal(true)}
-            className="px-4 py-2.5 rounded-xl bg-[#5236FF] hover:bg-[#634BFF] text-sm font-medium text-white flex items-center gap-2 shadow-lg shadow-[#5236FF]/25 transition cursor-pointer self-start"
-          >
-            <FolderPlus className="w-4 h-4" />
-            Nouveau Projet
-          </button>
-        </div>
+          <label className="flex items-center gap-2 h-8 px-3 w-full sm:w-64 rounded-lg bg-surface border border-outline-variant focus-within:border-outline transition-colors duration-100">
+            <Search className="w-4 h-4 text-on-surface-variant shrink-0" aria-hidden />
+            <input
+              ref={searchRef}
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Rechercher..."
+              aria-label="Rechercher un projet"
+              className="w-full min-w-0 bg-transparent border-none p-0 text-body-sm text-on-surface placeholder:text-outline focus:outline-none [&::-webkit-search-cancel-button]:hidden"
+            />
+            <Kbd>{isMac ? '⌘K' : 'Ctrl K'}</Kbd>
+          </label>
+        </header>
 
         {loading ? (
-          <div className="text-sm text-zinc-500 py-16 text-center">Chargement des projets...</div>
+          <div className="py-16 flex items-center justify-center gap-2 text-body-md text-on-surface-variant">
+            <Spinner />
+            Chargement des projets...
+          </div>
         ) : projects.length === 0 ? (
-          <div className="border border-dashed border-zinc-800 rounded-2xl p-14 text-center bg-zinc-900/30">
-            <FileCode2 className="w-10 h-10 text-zinc-600 mx-auto mb-3" />
-            <h2 className="text-base font-medium text-zinc-200">Aucun projet pour le moment</h2>
-            <p className="text-xs text-zinc-500 mt-1 mb-5">
+          <div className="border border-dashed border-outline-variant rounded-xl px-6 py-14 text-center bg-surface">
+            <FileCode2 className="w-8 h-8 text-outline mx-auto mb-3" />
+            <h2 className="font-display text-title-lg text-on-surface">Aucun projet pour le moment</h2>
+            <p className="text-body-md text-on-surface-variant mt-1 mb-5">
               Crée ton premier article scientifique, mémoire ou présentation Beamer.
             </p>
-            <button
-              onClick={() => setShowCreateModal(true)}
-              className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-medium text-white inline-flex items-center gap-2 transition cursor-pointer"
-            >
-              <FolderPlus className="w-4 h-4" />
+            <Button variant="primary" onClick={() => setShowCreateModal(true)}>
               Créer un projet
-            </button>
+            </Button>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {projects.map((p) => (
-              <div
-                key={p.id}
-                onClick={() => onOpenProject(p.id)}
-                className="group bg-zinc-900/60 hover:bg-zinc-900 border border-zinc-800/80 hover:border-indigo-500/50 rounded-2xl p-5 transition cursor-pointer flex flex-col justify-between"
-              >
-                <div>
-                  <div className="flex items-start justify-between gap-2">
-                    <h3 className="font-medium text-zinc-100 group-hover:text-indigo-300 transition line-clamp-1">
-                      {p.name}
-                    </h3>
-                    <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded bg-zinc-800 text-zinc-300 shrink-0">
-                      {p.compiler}
-                    </span>
-                  </div>
+          <>
+            {latest && (
+              <LatestSessionCard
+                project={latest}
+                owner={ownerOf(latest)}
+                onOpen={() => onOpenProject(latest.id)}
+                onDelete={(e) => void handleDelete(e, latest)}
+              />
+            )}
 
-                  {isAdmin && p.owner && p.owner.id !== user.id && (
-                    <p className="text-[11px] text-amber-300/80 mt-1 truncate" title={p.owner.email}>
-                      Propriétaire : {p.owner.name || p.owner.email}
-                    </p>
-                  )}
-
-                  {p.description ? (
-                    <p className="text-xs text-zinc-400 mt-2 line-clamp-2">{p.description}</p>
-                  ) : (
-                    <p className="text-xs text-zinc-600 italic mt-2">Aucune description</p>
-                  )}
-                </div>
-
-                <div className="mt-5 pt-3.5 border-t border-zinc-800/70 flex items-center justify-between text-xs text-zinc-500">
-                  <span className="flex items-center gap-1.5">
-                    <Clock className="w-3.5 h-3.5" />
-                    {formatDate(p.updatedAt)}
-                  </span>
-
-                  <div className="flex items-center gap-1">
-                    <span className="text-[11px] mr-1">{p.fileCount} fich.</span>
-                    <a
-                      href={api.projects.exportZipUrl(p.id)}
-                      onClick={(e) => e.stopPropagation()}
-                      title="Exporter en .zip"
-                      className="p-1.5 rounded-lg hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 transition"
-                    >
-                      <Download className="w-3.5 h-3.5" />
-                    </a>
+            <section aria-label="Bibliothèque des manuscrits" className="flex flex-col gap-gutter-md">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h2 className="font-mono text-code-sm uppercase tracking-wider text-on-surface-variant tabular-nums">
+                  {filtering ? 'Résultats' : 'Bibliothèque'} ({library.length})
+                </h2>
+                <div className="flex items-center gap-1.5" role="radiogroup" aria-label="Filtrer par moteur">
+                  {ENGINE_FILTERS.map((f) => (
                     <button
-                      onClick={(e) => handleDelete(e, p)}
-                      title="Supprimer le projet"
-                      className="p-1.5 rounded-lg hover:bg-red-500/15 text-zinc-400 hover:text-red-400 transition cursor-pointer"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </main>
-
-      {/* Modal Nouveau Projet */}
-      {showCreateModal && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-lg bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl p-6">
-            <h2 className="text-lg font-semibold text-white mb-4">Nouveau Projet LaTeX</h2>
-            <form onSubmit={handleCreate} className="space-y-4">
-              <div>
-                <label className="block text-xs font-medium text-zinc-400 mb-1">
-                  Titre du projet
-                </label>
-                <input
-                  type="text"
-                  required
-                  autoFocus
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
-                  placeholder="Ex : Mémoire Systèmes Distribués"
-                  className="w-full px-3.5 py-2 rounded-xl bg-zinc-950 border border-zinc-800 text-sm text-zinc-100 focus:outline-none focus:border-indigo-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-zinc-400 mb-1">
-                  Description (optionnelle)
-                </label>
-                <input
-                  type="text"
-                  value={newDesc}
-                  onChange={(e) => setNewDesc(e.target.value)}
-                  placeholder="Notes ou objectif du document..."
-                  className="w-full px-3.5 py-2 rounded-xl bg-zinc-950 border border-zinc-800 text-sm text-zinc-100 focus:outline-none focus:border-indigo-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-zinc-400 mb-2">Modèle</label>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                  {TEMPLATES.map((tpl) => (
-                    <button
+                      key={f.id}
                       type="button"
-                      key={tpl.id}
-                      onClick={() => setNewTemplate(tpl.id)}
-                      className={`text-left p-3 rounded-xl border transition cursor-pointer ${
-                        newTemplate === tpl.id
-                          ? 'bg-indigo-500/15 border-indigo-500 text-white'
-                          : 'bg-zinc-950 border-zinc-800 text-zinc-300 hover:border-zinc-700'
-                      }`}
+                      role="radio"
+                      aria-checked={engine === f.id}
+                      onClick={() => setEngine(f.id)}
+                      className={cx(
+                        'h-6 px-2.5 rounded-lg text-label-md transition-colors duration-100',
+                        f.id !== 'all' && 'font-mono font-normal',
+                        engine === f.id
+                          ? 'bg-surface-container text-on-surface'
+                          : 'text-on-surface-variant hover:text-on-surface'
+                      )}
                     >
-                      <div className="flex items-center gap-2 font-medium text-xs">
-                        {tpl.icon}
-                        {tpl.title}
-                      </div>
-                      <p className="text-[11px] text-zinc-400 mt-1 leading-snug">{tpl.subtitle}</p>
+                      {f.label}
                     </button>
                   ))}
                 </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-medium text-zinc-400 mb-1">
-                  Moteur de compilation par défaut
-                </label>
-                <select
-                  value={newCompiler}
-                  onChange={(e) => setNewCompiler(e.target.value as CompilerEngine)}
-                  className="w-full px-3.5 py-2 rounded-xl bg-zinc-950 border border-zinc-800 text-sm text-zinc-100 focus:outline-none focus:border-indigo-500"
-                >
-                  <option value="pdflatex">pdfLaTeX (Recommandé — rapide & universel)</option>
-                  <option value="xelatex">XeLaTeX (Unicode natif)</option>
-                  <option value="lualatex">LuaLaTeX (Scripts Lua & polices modernes)</option>
-                </select>
-              </div>
+              {library.length === 0 ? (
+                <p className="py-10 text-center text-body-md text-on-surface-variant">
+                  Aucun projet ne correspond à ta recherche.
+                </p>
+              ) : (
+                <ul className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-gutter-md">
+                  {library.map((p) => (
+                    <li key={p.id}>
+                      <ProjectCard
+                        project={p}
+                        owner={ownerOf(p)}
+                        onOpen={() => onOpenProject(p.id)}
+                        onDelete={(e) => void handleDelete(e, p)}
+                      />
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          </>
+        )}
+      </div>
 
-              <div className="flex items-center justify-end gap-2 pt-3 border-t border-zinc-800">
-                <button
-                  type="button"
-                  onClick={() => setShowCreateModal(false)}
-                  className="px-4 py-2 rounded-xl text-xs text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition cursor-pointer"
-                >
-                  Annuler
-                </button>
-                <button
-                  type="submit"
-                  disabled={creating}
-                  className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-medium text-white transition cursor-pointer"
-                >
-                  {creating ? 'Création...' : 'Créer et ouvrir'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+      {showCreateModal && (
+        <CreateProjectModal
+          onClose={() => setShowCreateModal(false)}
+          onCreated={(id) => {
+            setShowCreateModal(false);
+            onOpenProject(id);
+          }}
+        />
       )}
-    </div>
+    </AppShell>
   );
 };
 
-/** Jauge d'espace disque de l'utilisateur connecté (quota USER_QUOTA_MB, limite MAX_UPLOAD_MB). */
-const StorageMeter: React.FC<{ storage: StorageUsage; isAdmin: boolean }> = ({
-  storage,
-  isAdmin,
-}) => {
-  const { usedBytes, quotaBytes, maxUploadBytes } = storage;
-  const ratio = quotaRatio(usedBytes, quotaBytes);
-  const over = quotaBytes !== null && usedBytes >= quotaBytes;
+type Owner = { name: string; email: string } | null;
+
+const OwnerLine: React.FC<{ owner: Owner }> = ({ owner }) =>
+  owner ? (
+    <p className="flex items-center gap-1 text-label-sm text-on-surface-variant truncate" title={owner.email}>
+      <UserRound className="w-3 h-3 shrink-0" />
+      Propriétaire : {owner.name}
+    </p>
+  ) : null;
+
+/** Carte mise en avant : le projet modifié le plus récemment, avec un extrait du document. */
+const LatestSessionCard: React.FC<{
+  project: ProjectSummary;
+  owner: Owner;
+  onOpen: () => void;
+  onDelete: (e: React.MouseEvent) => void;
+}> = ({ project: p, owner, onOpen, onDelete }) => {
+  const [excerpt, setExcerpt] = useState<LatexExcerpt | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    setExcerpt(null);
+    api.projects
+      .get(p.id)
+      .then(({ project }) => {
+        const root = project.files.find((f) => f.path === project.rootFile);
+        if (active && root?.content) setExcerpt(extractLatexExcerpt(root.content));
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [p.id, p.updatedAt]);
+
+  const hasExcerpt = Boolean(excerpt && (excerpt.title || excerpt.text));
 
   return (
-    <div className="mt-4 w-full max-w-sm" aria-label="Espace de stockage">
-      <div className="flex items-center justify-between gap-3 text-xs mb-1.5">
-        <span className="flex items-center gap-1.5 text-zinc-300">
-          <HardDrive className="w-3.5 h-3.5 text-zinc-500" />
-          {isAdmin ? 'Stockage de tes projets' : 'Stockage'}
-        </span>
-        <span className="text-zinc-400 tabular-nums">
-          {quotaBytes === null
-            ? `${formatBytes(usedBytes)} • sans limite`
-            : `${formatBytes(usedBytes)} / ${formatBytes(quotaBytes)}`}
-        </span>
+    <section
+      aria-label="Reprendre la rédaction"
+      className={cx(
+        'grid grid-cols-1 gap-gutter-lg items-center p-gutter-lg rounded-xl bg-surface border border-outline-variant',
+        hasExcerpt && 'md:grid-cols-[minmax(0,1fr)_minmax(0,420px)]'
+      )}
+    >
+      <div className="flex flex-col gap-3.5 min-w-0">
+        <div className="flex items-center gap-2 font-mono text-code-sm text-on-surface-variant tabular-nums">
+          <span className="uppercase tracking-wider text-primary-text">Dernière session</span>
+          <span aria-hidden>•</span>
+          <time dateTime={new Date(p.updatedAt).toISOString()} title={fullDateFormat.format(p.updatedAt)}>
+            {dateTimeFormat.format(p.updatedAt)}
+          </time>
+        </div>
+        <div className="flex items-start gap-3">
+          <h2 className="font-display text-headline-lg text-on-surface leading-snug min-w-0">{p.name}</h2>
+          <Badge mono className="mt-1.5">
+            {p.compiler}
+          </Badge>
+        </div>
+        <OwnerLine owner={owner} />
+        <p className="text-body-md text-on-surface-variant">
+          {p.description ? `${p.description.replace(/\.?\s*$/, '.')} ` : ''}
+          {p.fileCount} fichier{p.fileCount > 1 ? 's' : ''} dont{' '}
+          <span className="font-mono text-code-sm text-on-surface">{p.rootFile}</span>.
+        </p>
+        <div className="flex flex-wrap items-center gap-gutter-sm pt-1">
+          <Button variant="primary" size="lg" onClick={onOpen}>
+            Reprendre l'écriture
+            <ArrowRight className="w-4 h-4" />
+          </Button>
+          <Button
+            size="lg"
+            variant="secondary"
+            href={api.projects.exportZipUrl(p.id)}
+            title="Exporter en .zip"
+            icon={<FolderArchive className="w-4 h-4" />}
+            className="bg-transparent text-on-surface-variant hover:text-on-surface"
+          >
+            .zip
+          </Button>
+          <IconButton tone="danger" label="Supprimer le projet" onClick={onDelete}>
+            <Trash2 className="w-4 h-4" />
+          </IconButton>
+        </div>
       </div>
-      {ratio !== null && (
+
+      {hasExcerpt && excerpt && (
         <div
-          className="h-1.5 rounded-full bg-zinc-800 overflow-hidden"
-          role="progressbar"
-          aria-valuemin={0}
-          aria-valuemax={100}
-          aria-valuenow={Math.round(ratio * 100)}
+          aria-hidden
+          onClick={onOpen}
+          className="hidden md:flex flex-col gap-2 p-5 rounded-lg bg-surface-container-low border border-outline-variant text-on-surface cursor-pointer select-none"
         >
-          <div
-            className={`h-full rounded-full transition-all ${quotaBarColor(ratio)}`}
-            style={{ width: `${Math.max(ratio * 100, usedBytes > 0 ? 1 : 0)}%` }}
-          />
+          {excerpt.title && (
+            <span className="font-display font-semibold text-title-md text-center line-clamp-2">
+              {excerpt.title}
+            </span>
+          )}
+          {excerpt.authors && (
+            <span className="text-label-sm font-normal text-center text-on-surface-variant line-clamp-1">
+              {excerpt.authors}
+            </span>
+          )}
+          {excerpt.text && (
+            <>
+              <span className="h-px bg-outline-variant my-1" />
+              <p className="font-display text-body-sm leading-relaxed text-on-surface-variant line-clamp-5">
+                {excerpt.text}
+              </p>
+            </>
+          )}
         </div>
       )}
-      <p className={`text-[11px] mt-1.5 ${over ? 'text-red-300' : 'text-zinc-500'}`}>
-        {over
-          ? 'Quota atteint : supprime des fichiers ou des projets pour en ajouter.'
-          : quotaBytes === null
-            ? `Fichiers jusqu'à ${formatBytes(maxUploadBytes)}`
-            : `${formatBytes(quotaBytes - usedBytes)} disponibles • fichiers jusqu'à ${formatBytes(maxUploadBytes)}`}
-      </p>
+    </section>
+  );
+};
+
+const ProjectCard: React.FC<{
+  project: ProjectSummary;
+  owner: Owner;
+  onOpen: () => void;
+  onDelete: (e: React.MouseEvent) => void;
+}> = ({ project: p, owner, onOpen, onDelete }) => (
+  <article
+    role="link"
+    tabIndex={0}
+    aria-label={`Ouvrir ${p.name}`}
+    onClick={onOpen}
+    onKeyDown={(e) => {
+      if (e.key === 'Enter') onOpen();
+    }}
+    className="h-full flex flex-col justify-between gap-gutter-md p-5 rounded-xl bg-surface border border-outline-variant hover:border-outline transition-colors duration-100 ease-out cursor-pointer"
+  >
+    <div className="flex flex-col gap-1.5 min-w-0">
+      <div className="flex items-start justify-between gap-2">
+        <h3 className="font-display text-headline-md text-on-surface line-clamp-1">{p.name}</h3>
+        <Badge mono className="mt-0.5">
+          {p.compiler}
+        </Badge>
+      </div>
+      <OwnerLine owner={owner} />
+      {p.description ? (
+        <p className="text-body-sm text-on-surface-variant leading-relaxed line-clamp-2">{p.description}</p>
+      ) : (
+        <p className="text-body-sm text-outline italic">Aucune description</p>
+      )}
     </div>
+
+    <div className="flex items-center justify-between pt-3 border-t border-outline-variant font-mono text-code-sm font-normal text-outline tabular-nums">
+      <span title={`Modifié le ${fullDateFormat.format(p.updatedAt)}`}>
+        {shortDateFormat.format(p.updatedAt)} • {p.fileCount} fich.
+      </span>
+      <span className="flex items-center gap-1 text-on-surface-variant">
+        <IconButton
+          size="sm"
+          label="Exporter en .zip"
+          href={api.projects.exportZipUrl(p.id)}
+          onClick={(e: React.MouseEvent) => e.stopPropagation()}
+        >
+          <FolderArchive className="w-3.5 h-3.5" />
+        </IconButton>
+        <IconButton size="sm" tone="danger" label="Supprimer le projet" onClick={onDelete}>
+          <Trash2 className="w-3.5 h-3.5" />
+        </IconButton>
+      </span>
+    </div>
+  </article>
+);
+
+const CreateProjectModal: React.FC<{
+  onClose: () => void;
+  onCreated: (projectId: string) => void;
+}> = ({ onClose, onCreated }) => {
+  const nameId = useId();
+  const descId = useId();
+  const compilerId = useId();
+  const [name, setName] = useState('');
+  const [desc, setDesc] = useState('');
+  const [template, setTemplate] = useState<ProjectTemplateId>('article');
+  const [compiler, setCompiler] = useState<CompilerEngine>('pdflatex');
+  const [creating, setCreating] = useState(false);
+
+  const handleCreate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!name.trim()) return;
+    setCreating(true);
+    try {
+      const res = await api.projects.create({
+        name: name.trim(),
+        description: desc.trim(),
+        template,
+        compiler,
+      });
+      onCreated(res.project.id);
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  return (
+    <Modal title="Nouveau projet LaTeX" onClose={onClose} size="md">
+      <form onSubmit={handleCreate} className="space-y-gutter-md">
+        <Field label="Titre du projet" htmlFor={nameId}>
+          <input
+            id={nameId}
+            type="text"
+            required
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Ex : Mémoire Systèmes Distribués"
+            className={inputClass}
+          />
+        </Field>
+
+        <Field label="Description (optionnelle)" htmlFor={descId}>
+          <input
+            id={descId}
+            type="text"
+            value={desc}
+            onChange={(e) => setDesc(e.target.value)}
+            placeholder="Notes ou objectif du document..."
+            className={inputClass}
+          />
+        </Field>
+
+        <fieldset className="space-y-1.5">
+          <legend className="text-label-md text-on-surface-variant mb-1.5">Modèle</legend>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-gutter-sm" role="radiogroup">
+            {TEMPLATES.map(({ id, title, subtitle, Icon }) => {
+              const selected = template === id;
+              return (
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={selected}
+                  key={id}
+                  onClick={() => setTemplate(id)}
+                  className={cx(
+                    'text-left p-3 rounded-lg border transition-colors duration-100 ease-out',
+                    selected
+                      ? 'bg-primary-container border-primary'
+                      : 'bg-surface-container-lowest border-outline-variant hover:border-outline'
+                  )}
+                >
+                  <span
+                    className={cx(
+                      'flex items-center gap-2 text-label-lg',
+                      selected ? 'text-on-primary-container' : 'text-on-surface'
+                    )}
+                  >
+                    <Icon className="w-4 h-4 shrink-0" />
+                    {title}
+                  </span>
+                  <span className="block text-body-sm text-on-surface-variant mt-1">{subtitle}</span>
+                </button>
+              );
+            })}
+          </div>
+        </fieldset>
+
+        <Field label="Moteur de compilation par défaut" htmlFor={compilerId}>
+          <select
+            id={compilerId}
+            value={compiler}
+            onChange={(e) => setCompiler(e.target.value as CompilerEngine)}
+            className={inputClass}
+          >
+            <option value="pdflatex">pdfLaTeX (recommandé — rapide & universel)</option>
+            <option value="xelatex">XeLaTeX (Unicode natif)</option>
+            <option value="lualatex">LuaLaTeX (scripts Lua & polices modernes)</option>
+          </select>
+        </Field>
+
+        <div className="flex items-center justify-end gap-2 pt-gutter-md border-t border-outline-variant">
+          <Button variant="ghost" onClick={onClose}>
+            Annuler
+          </Button>
+          <Button type="submit" variant="primary" loading={creating} disabled={creating}>
+            {creating ? 'Création...' : 'Créer et ouvrir'}
+          </Button>
+        </div>
+      </form>
+    </Modal>
   );
 };

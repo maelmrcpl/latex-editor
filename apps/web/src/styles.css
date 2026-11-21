@@ -1,38 +1,364 @@
 @import "tailwindcss";
 
-@layer base {
-  * {
-    scrollbar-width: thin;
-    scrollbar-color: rgba(113, 113, 122, 0.4) transparent;
+/* Polices auto-hébergées (la CSP n'autorise que les polices servies par l'application) */
+@import "@fontsource-variable/afacad-flux/wght.css";
+@import "@fontsource-variable/instrument-sans/wght.css";
+@import "@fontsource-variable/source-code-pro/wght.css";
+
+/*
+ * SynTeX — Atelier Typographique
+ * Tokens de couleur : sombre par défaut (`:root`), clair via `<html data-theme="light">`.
+ * Les utilitaires Tailwind (`bg-surface`, `text-on-surface-variant`, `border-outline-variant`...)
+ * pointent vers ces variables, le thème bascule donc sans changer les classes.
+ */
+:root {
+  color-scheme: dark;
+
+  --sx-primary: #4e5fe3;
+  --sx-on-primary: #ffffff;
+  --sx-primary-container: #1d2142;
+  --sx-on-primary-container: #9aa8ff;
+  --sx-primary-text: #9aa8ff;
+  --sx-secondary: #a1a1aa;
+  --sx-on-secondary: #131316;
+  --sx-secondary-container: #27272d;
+  --sx-on-secondary-container: #e4e4e7;
+  --sx-tertiary: #9aa8ff;
+  --sx-on-tertiary: #131316;
+  --sx-tertiary-container: #1d2142;
+  --sx-on-tertiary-container: #e4e4e7;
+  --sx-error: #f87171;
+  --sx-on-error: #450a0a;
+  --sx-error-container: #7f1d1d;
+  --sx-on-error-container: #fee2e2;
+  --sx-background: #0c0c0e;
+  --sx-on-background: #e4e4e7;
+  --sx-surface: #131316;
+  --sx-surface-dim: #0c0c0e;
+  --sx-surface-bright: #1b1b1f;
+  --sx-surface-container-lowest: #0c0c0e;
+  --sx-surface-container-low: #131316;
+  --sx-surface-container: #1b1b1f;
+  --sx-surface-container-high: #222228;
+  --sx-surface-container-highest: #2a2a32;
+  --sx-on-surface: #e4e4e7;
+  --sx-surface-variant: #27272d;
+  --sx-on-surface-variant: #a1a1aa;
+  --sx-outline: #71717a;
+  --sx-outline-variant: #27272d;
+  --sx-inverse-surface: #e4e4e7;
+  --sx-inverse-on-surface: #18181b;
+  --sx-inverse-primary: #3b49df;
+  --sx-success: #6ee7b7;
+  --sx-on-success: #064e3b;
+  --sx-success-container: #064e3b;
+  --sx-on-success-container: #a7f3d0;
+  --sx-warning: #fbbf24;
+  --sx-on-warning: #451a03;
+  --sx-warning-container: #451a03;
+  --sx-on-warning-container: #fde68a;
+
+  /* Feuille PDF simulée et voile des modales */
+  --sx-sheet: #ffffff;
+  --sx-scrim: rgb(0 0 0 / 0.6);
+  --sx-shadow-color: rgb(0 0 0 / 0.5);
+
+  /* Coloration syntaxique de l'éditeur LaTeX */
+  /* Palette d'origine de l'éditeur : une couleur par catégorie de jeton */
+  --sx-syntax-comment: #71717a;
+  --sx-syntax-keyword: #a78bfa;
+  --sx-syntax-heading: #38bdf8;
+  --sx-syntax-atom: #fbbf24;
+  --sx-syntax-command: #818cf8;
+  --sx-syntax-math: #34d399;
+  --sx-syntax-variable: #6ee7b7;
+  --sx-syntax-number: #f472b6;
+  --sx-syntax-definition: #c084fc;
+  --sx-syntax-brace: #a1a1aa;
+  --sx-syntax-bracket: #94a3b8;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --sx-primary: #3b49df;
+  --sx-on-primary: #ffffff;
+  --sx-primary-container: #e0e4ff;
+  --sx-on-primary-container: #1d2142;
+  --sx-primary-text: #3b49df;
+  --sx-secondary: #52525b;
+  --sx-on-secondary: #ffffff;
+  --sx-secondary-container: #e4e4e7;
+  --sx-on-secondary-container: #18181b;
+  --sx-tertiary: #475569;
+  --sx-on-tertiary: #ffffff;
+  --sx-tertiary-container: #e2e8f0;
+  --sx-on-tertiary-container: #1e293b;
+  --sx-error: #dc2626;
+  --sx-on-error: #ffffff;
+  --sx-error-container: #fee2e2;
+  --sx-on-error-container: #7f1d1d;
+  --sx-background: #fafafa;
+  --sx-on-background: #18181b;
+  --sx-surface: #fafafa;
+  --sx-surface-dim: #e4e4e7;
+  --sx-surface-bright: #ffffff;
+  --sx-surface-container-lowest: #ffffff;
+  --sx-surface-container-low: #f4f4f5;
+  --sx-surface-container: #e4e4e7;
+  --sx-surface-container-high: #d4d4d8;
+  --sx-surface-container-highest: #c4c4cc;
+  --sx-on-surface: #18181b;
+  --sx-surface-variant: #e4e4e7;
+  --sx-on-surface-variant: #52525b;
+  --sx-outline: #71717a;
+  --sx-outline-variant: #d4d4d8;
+  --sx-inverse-surface: #18181b;
+  --sx-inverse-on-surface: #f4f4f5;
+  --sx-inverse-primary: #9aa8ff;
+  --sx-success: #15803d;
+  --sx-on-success: #ffffff;
+  --sx-success-container: #dcfce7;
+  --sx-on-success-container: #14532d;
+  --sx-warning: #b45309;
+  --sx-on-warning: #ffffff;
+  --sx-warning-container: #fef3c7;
+  --sx-on-warning-container: #78350f;
+
+  --sx-sheet: #ffffff;
+  --sx-scrim: rgb(24 24 27 / 0.4);
+  --sx-shadow-color: rgb(24 24 27 / 0.16);
+
+  --sx-syntax-comment: #71717a;
+  --sx-syntax-keyword: #7c3aed;
+  --sx-syntax-heading: #0369a1;
+  --sx-syntax-atom: #b45309;
+  --sx-syntax-command: #4f46e5;
+  --sx-syntax-math: #047857;
+  --sx-syntax-variable: #0f766e;
+  --sx-syntax-number: #be185d;
+  --sx-syntax-definition: #9333ea;
+  --sx-syntax-brace: #52525b;
+  --sx-syntax-bracket: #64748b;
+}
+
+@theme inline {
+  --color-*: initial;
+  --color-white: #ffffff;
+  --color-black: #000000;
+  --color-transparent: transparent;
+
+  --color-primary: var(--sx-primary);
+  --color-primary-hover: color-mix(in oklab, var(--sx-primary) 88%, white);
+  --color-on-primary: var(--sx-on-primary);
+  --color-primary-container: var(--sx-primary-container);
+  --color-on-primary-container: var(--sx-on-primary-container);
+  --color-primary-text: var(--sx-primary-text);
+  --color-secondary: var(--sx-secondary);
+  --color-on-secondary: var(--sx-on-secondary);
+  --color-secondary-container: var(--sx-secondary-container);
+  --color-on-secondary-container: var(--sx-on-secondary-container);
+  --color-tertiary: var(--sx-tertiary);
+  --color-on-tertiary: var(--sx-on-tertiary);
+  --color-tertiary-container: var(--sx-tertiary-container);
+  --color-on-tertiary-container: var(--sx-on-tertiary-container);
+  --color-error: var(--sx-error);
+  --color-on-error: var(--sx-on-error);
+  --color-error-container: var(--sx-error-container);
+  --color-on-error-container: var(--sx-on-error-container);
+  --color-background: var(--sx-background);
+  --color-on-background: var(--sx-on-background);
+  --color-surface: var(--sx-surface);
+  --color-surface-dim: var(--sx-surface-dim);
+  --color-surface-bright: var(--sx-surface-bright);
+  --color-surface-container-lowest: var(--sx-surface-container-lowest);
+  --color-surface-container-low: var(--sx-surface-container-low);
+  --color-surface-container: var(--sx-surface-container);
+  --color-surface-container-high: var(--sx-surface-container-high);
+  --color-surface-container-highest: var(--sx-surface-container-highest);
+  --color-on-surface: var(--sx-on-surface);
+  --color-surface-variant: var(--sx-surface-variant);
+  --color-on-surface-variant: var(--sx-on-surface-variant);
+  --color-outline: var(--sx-outline);
+  --color-outline-variant: var(--sx-outline-variant);
+  --color-inverse-surface: var(--sx-inverse-surface);
+  --color-inverse-on-surface: var(--sx-inverse-on-surface);
+  --color-inverse-primary: var(--sx-inverse-primary);
+  --color-success: var(--sx-success);
+  --color-on-success: var(--sx-on-success);
+  --color-success-container: var(--sx-success-container);
+  --color-on-success-container: var(--sx-on-success-container);
+  --color-warning: var(--sx-warning);
+  --color-on-warning: var(--sx-on-warning);
+  --color-warning-container: var(--sx-warning-container);
+  --color-on-warning-container: var(--sx-on-warning-container);
+  --color-sheet: var(--sx-sheet);
+  --color-scrim: var(--sx-scrim);
+
+  --shadow-overlay: 0 16px 40px -8px var(--sx-shadow-color), 0 2px 6px -2px var(--sx-shadow-color);
+  --shadow-sheet: 0 4px 18px -4px var(--sx-shadow-color), 0 1px 3px var(--sx-shadow-color);
+}
+
+@theme {
+  --font-sans: "Instrument Sans Variable", "Instrument Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Afacad Flux Variable", "Afacad Flux", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Source Code Pro Variable", "Source Code Pro", ui-monospace, Consolas, monospace;
+
+  /* Échelle typographique (à combiner avec font-display pour display / headline / title-lg) */
+  --text-display-lg: 36px;
+  --text-display-lg--line-height: 44px;
+  --text-display-lg--letter-spacing: -0.5px;
+  --text-display-lg--font-weight: 600;
+  --text-display-lg-mobile: 28px;
+  --text-display-lg-mobile--line-height: 34px;
+  --text-display-lg-mobile--letter-spacing: -0.25px;
+  --text-display-lg-mobile--font-weight: 600;
+  --text-headline-lg: 24px;
+  --text-headline-lg--line-height: 30px;
+  --text-headline-lg--letter-spacing: -0.25px;
+  --text-headline-lg--font-weight: 600;
+  --text-headline-md: 20px;
+  --text-headline-md--line-height: 26px;
+  --text-headline-md--letter-spacing: -0.15px;
+  --text-headline-md--font-weight: 600;
+  --text-title-lg: 16px;
+  --text-title-lg--line-height: 22px;
+  --text-title-lg--letter-spacing: 0px;
+  --text-title-lg--font-weight: 600;
+  --text-title-md: 14px;
+  --text-title-md--line-height: 20px;
+  --text-title-md--letter-spacing: 0.1px;
+  --text-title-md--font-weight: 600;
+  --text-body-lg: 15px;
+  --text-body-lg--line-height: 22px;
+  --text-body-lg--letter-spacing: 0px;
+  --text-body-md: 13px;
+  --text-body-md--line-height: 20px;
+  --text-body-md--letter-spacing: 0px;
+  --text-body-sm: 12px;
+  --text-body-sm--line-height: 16px;
+  --text-body-sm--letter-spacing: 0.1px;
+  --text-label-lg: 13px;
+  --text-label-lg--line-height: 18px;
+  --text-label-lg--letter-spacing: 0.1px;
+  --text-label-lg--font-weight: 600;
+  --text-label-md: 12px;
+  --text-label-md--line-height: 16px;
+  --text-label-md--letter-spacing: 0.2px;
+  --text-label-md--font-weight: 500;
+  --text-label-sm: 11px;
+  --text-label-sm--line-height: 14px;
+  --text-label-sm--letter-spacing: 0.3px;
+  --text-label-sm--font-weight: 500;
+  --text-code-md: 13px;
+  --text-code-md--line-height: 21px;
+  --text-code-sm: 11px;
+  --text-code-sm--line-height: 16px;
+  --text-code-sm--font-weight: 500;
+
+  /* Espacement : pas strict 4 px / 8 px */
+  --spacing-gutter-xs: 4px;
+  --spacing-gutter-sm: 8px;
+  --spacing-gutter-md: 16px;
+  --spacing-gutter-lg: 24px;
+  --spacing-gutter-xl: 32px;
+  --spacing-section: 48px;
+  --spacing-page-margin: 24px;
+
+  /* Mouvement */
+  --ease-enter: cubic-bezier(0.2, 0, 0, 1);
+  --ease-exit: cubic-bezier(0.3, 0, 1, 1);
+  --animate-surface-enter: surface-enter 220ms cubic-bezier(0.2, 0, 0, 1);
+  --animate-scrim-enter: scrim-enter 220ms cubic-bezier(0.2, 0, 0, 1);
+
+  @keyframes surface-enter {
+    from {
+      opacity: 0;
+      transform: translateY(6px) scale(0.99);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  @keyframes scrim-enter {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
   }
 }
 
+@layer base {
+  html,
+  body {
+    background-color: var(--color-background);
+    color: var(--color-on-background);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklab, var(--sx-outline) 45%, transparent) transparent;
+  }
+
+  ::selection {
+    background-color: color-mix(in oklab, var(--sx-primary) 35%, transparent);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+  }
+
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  select:not(:disabled),
+  summary {
+    cursor: pointer;
+  }
+
+  kbd {
+    font-family: var(--font-mono);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    transition-duration: 1ms !important;
+  }
+}
+
+/* Éditeur CodeMirror */
 .cm-editor {
   height: 100%;
-  font-family: "JetBrains Mono", "Fira Code", "Cascadia Code", Consolas, monospace;
-  font-size: 13.5px;
+  font-family: var(--font-mono);
+  font-size: 13px;
 }
 
 .cm-editor.cm-focused {
   outline: none !important;
 }
 
-@keyframes synctexPulse {
-  0% {
-    opacity: 0.95;
-    transform: scaleY(1.15);
-  }
-  70% {
-    opacity: 0.55;
-    transform: scaleY(1);
+/* SyncTeX : repère qui s'estompe sur la feuille PDF */
+@keyframes synctex-fade {
+  0%,
+  40% {
+    opacity: 1;
   }
   100% {
     opacity: 0;
-    transform: scaleY(1);
   }
 }
 
 .synctex-highlight {
-  animation: synctexPulse 2.1s ease-out forwards;
+  animation: synctex-fade 1.8s ease-out forwards;
   pointer-events: none;
 }
