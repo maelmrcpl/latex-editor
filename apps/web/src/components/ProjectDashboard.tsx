@@ -2,21 +2,26 @@ import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
 import {
   ArrowRight,
   BookOpen,
+  Copy,
   FileCode2,
+  FileUp,
   FolderArchive,
+  Pencil,
+  Pin,
   Presentation,
   ScrollText,
   Search,
   Sparkles,
   Trash2,
   UserRound,
+  X,
 } from 'lucide-react';
 import type { AuthUser, CompilerEngine, ProjectSummary, ProjectTemplateId } from '@prism-latex/shared';
 import { api } from '../lib/api';
 import { extractLatexExcerpt, type LatexExcerpt } from '../lib/latexExcerpt';
 import { AppShell } from './AppShell';
 import { Modal, useDialogs } from './ui/Dialog';
-import { Badge, Button, cx, Field, IconButton, inputClass, Kbd, Spinner } from './ui';
+import { Alert, Badge, Button, cx, Field, IconButton, inputClass, Kbd, Spinner } from './ui';
 
 interface ProjectDashboardProps {
   user: AuthUser;
@@ -67,6 +72,27 @@ const ENGINE_FILTERS: Array<{ id: 'all' | CompilerEngine; label: string }> = [
   { id: 'lualatex', label: 'LuaLaTeX' },
 ];
 
+type SortMode = 'recent' | 'name' | 'created';
+
+const SORT_MODES: Array<{ id: SortMode; label: string }> = [
+  { id: 'recent', label: 'Modifiés récemment' },
+  { id: 'name', label: 'Nom' },
+  { id: 'created', label: 'Date de création' },
+];
+
+const nameCollator = new Intl.Collator('fr', { sensitivity: 'base', numeric: true });
+
+function compareProjects(a: ProjectSummary, b: ProjectSummary, sort: SortMode): number {
+  if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+  if (sort === 'name') return nameCollator.compare(a.name, b.name);
+  if (sort === 'created') return b.createdAt - a.createdAt;
+  return b.updatedAt - a.updatedAt;
+}
+
+function errorMessage(err: unknown, fallback: string): string {
+  return err instanceof Error && err.message ? err.message : fallback;
+}
+
 const dateTimeFormat = new Intl.DateTimeFormat('fr-FR', {
   day: 'numeric',
   month: 'short',
@@ -94,7 +120,12 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
   const [showCreateModal, setShowCreateModal] = useState(autoOpenCreate);
   const [query, setQuery] = useState('');
   const [engine, setEngine] = useState<'all' | CompilerEngine>('all');
+  const [sort, setSort] = useState<SortMode>('recent');
+  const [error, setError] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [editing, setEditing] = useState<ProjectSummary | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (autoOpenCreate) onAutoOpenHandled?.();
@@ -133,15 +164,23 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
   const latest = !filtering ? projects[0] : undefined;
   const library = useMemo(() => {
     const q = query.trim().toLocaleLowerCase('fr');
-    return projects.filter(
-      (p) =>
-        (engine === 'all' || p.compiler === engine) &&
-        (!q ||
-          p.name.toLocaleLowerCase('fr').includes(q) ||
-          p.description.toLocaleLowerCase('fr').includes(q) ||
-          (p.owner?.name ?? '').toLocaleLowerCase('fr').includes(q))
+    return projects
+      .filter(
+        (p) =>
+          (engine === 'all' || p.compiler === engine) &&
+          (!q ||
+            p.name.toLocaleLowerCase('fr').includes(q) ||
+            p.description.toLocaleLowerCase('fr').includes(q) ||
+            (p.owner?.name ?? '').toLocaleLowerCase('fr').includes(q))
+      )
+      .sort((a, b) => compareProjects(a, b, sort));
+  }, [projects, query, engine, sort]);
+
+  /** Remplace un projet dans la liste, en gardant l'ordre « dernière modification » de `projects`. */
+  const upsertProject = (project: ProjectSummary) =>
+    setProjects((prev) =>
+      [project, ...prev.filter((p) => p.id !== project.id)].sort((a, b) => b.updatedAt - a.updatedAt)
     );
-  }, [projects, query, engine]);
 
   const ownerOf = (p: ProjectSummary) =>
     isAdmin && p.owner && p.owner.id !== user.id
@@ -162,10 +201,62 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
       tone: 'danger',
     });
     if (!ok) return;
-    await api.projects.delete(project.id);
-    setProjects((prev) => prev.filter((p) => p.id !== project.id));
-    setStorageVersion((v) => v + 1);
+    try {
+      await api.projects.delete(project.id);
+      setProjects((prev) => prev.filter((p) => p.id !== project.id));
+      setStorageVersion((v) => v + 1);
+    } catch (err) {
+      setError(errorMessage(err, 'Suppression impossible.'));
+    }
   };
+
+  const handleTogglePin = async (e: React.MouseEvent, project: ProjectSummary) => {
+    e.stopPropagation();
+    const pinned = !project.pinned;
+    setProjects((prev) => prev.map((p) => (p.id === project.id ? { ...p, pinned } : p)));
+    try {
+      await api.projects.update(project.id, { pinned });
+    } catch (err) {
+      setProjects((prev) => prev.map((p) => (p.id === project.id ? { ...p, pinned: !pinned } : p)));
+      setError(errorMessage(err, "Impossible d'épingler le projet."));
+    }
+  };
+
+  const handleDuplicate = async (e: React.MouseEvent, project: ProjectSummary) => {
+    e.stopPropagation();
+    try {
+      const res = await api.projects.duplicate(project.id);
+      upsertProject(res.project);
+      setStorageVersion((v) => v + 1);
+    } catch (err) {
+      setError(errorMessage(err, 'Duplication impossible.'));
+    }
+  };
+
+  const handleEdit = (e: React.MouseEvent, project: ProjectSummary) => {
+    e.stopPropagation();
+    setEditing(project);
+  };
+
+  const handleImport = async (file: File) => {
+    setError(null);
+    setImporting(true);
+    try {
+      const res = await api.projects.importZip(file);
+      onOpenProject(res.project.id);
+    } catch (err) {
+      setError(errorMessage(err, 'Import impossible.'));
+      setImporting(false);
+    }
+  };
+
+  const cardActions = (p: ProjectSummary) => ({
+    onOpen: () => onOpenProject(p.id),
+    onDelete: (e: React.MouseEvent) => void handleDelete(e, p),
+    onTogglePin: (e: React.MouseEvent) => void handleTogglePin(e, p),
+    onDuplicate: (e: React.MouseEvent) => void handleDuplicate(e, p),
+    onEdit: (e: React.MouseEvent) => handleEdit(e, p),
+  });
 
   return (
     <AppShell
@@ -190,20 +281,60 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
             </p>
           </div>
 
-          <label className="flex items-center gap-2 h-8 px-3 w-full sm:w-64 rounded-lg bg-surface border border-outline-variant focus-within:border-outline transition-colors duration-100">
-            <Search className="w-4 h-4 text-on-surface-variant shrink-0" aria-hidden />
+          <div className="flex items-center gap-gutter-sm w-full sm:w-auto">
+            <label className="flex items-center gap-2 h-8 px-3 w-full sm:w-64 rounded-lg bg-surface border border-outline-variant focus-within:border-outline transition-colors duration-100">
+              <Search className="w-4 h-4 text-on-surface-variant shrink-0" aria-hidden />
+              <input
+                ref={searchRef}
+                type="search"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Rechercher..."
+                aria-label="Rechercher un projet"
+                className="w-full min-w-0 bg-transparent border-none p-0 text-body-sm text-on-surface placeholder:text-outline focus:outline-none [&::-webkit-search-cancel-button]:hidden"
+              />
+              <Kbd>{isMac ? '⌘K' : 'Ctrl K'}</Kbd>
+            </label>
+            <Button
+              variant="secondary"
+              onClick={() => importInputRef.current?.click()}
+              loading={importing}
+              disabled={importing}
+              icon={<FileUp className="w-4 h-4" />}
+              title="Importer un projet depuis une archive .zip"
+              className="shrink-0"
+            >
+              {importing ? 'Import...' : 'Importer'}
+            </Button>
             <input
-              ref={searchRef}
-              type="search"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Rechercher..."
-              aria-label="Rechercher un projet"
-              className="w-full min-w-0 bg-transparent border-none p-0 text-body-sm text-on-surface placeholder:text-outline focus:outline-none [&::-webkit-search-cancel-button]:hidden"
+              ref={importInputRef}
+              type="file"
+              accept=".zip,application/zip,application/x-zip-compressed"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                e.target.value = '';
+                if (file) void handleImport(file);
+              }}
             />
-            <Kbd>{isMac ? '⌘K' : 'Ctrl K'}</Kbd>
-          </label>
+          </div>
         </header>
+
+        {error && (
+          <Alert className="-mt-gutter-md">
+            <span className="flex items-start justify-between gap-3">
+              <span>{error}</span>
+              <button
+                type="button"
+                onClick={() => setError(null)}
+                aria-label="Masquer le message"
+                className="shrink-0 opacity-70 hover:opacity-100"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </span>
+          </Alert>
+        )}
 
         {loading ? (
           <div className="py-16 flex items-center justify-center gap-2 text-body-md text-on-surface-variant">
@@ -215,21 +346,27 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
             <FileCode2 className="w-8 h-8 text-outline mx-auto mb-3" />
             <h2 className="font-display text-title-lg text-on-surface">Aucun projet pour le moment</h2>
             <p className="text-body-md text-on-surface-variant mt-1 mb-5">
-              Crée ton premier article scientifique, mémoire ou présentation Beamer.
+              Crée ton premier article scientifique, mémoire ou présentation Beamer, ou importe un
+              projet existant (.zip, par exemple exporté depuis Overleaf).
             </p>
-            <Button variant="primary" onClick={() => setShowCreateModal(true)}>
-              Créer un projet
-            </Button>
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <Button variant="primary" onClick={() => setShowCreateModal(true)}>
+                Créer un projet
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => importInputRef.current?.click()}
+                disabled={importing}
+                icon={<FileUp className="w-4 h-4" />}
+              >
+                Importer un .zip
+              </Button>
+            </div>
           </div>
         ) : (
           <>
             {latest && (
-              <LatestSessionCard
-                project={latest}
-                owner={ownerOf(latest)}
-                onOpen={() => onOpenProject(latest.id)}
-                onDelete={(e) => void handleDelete(e, latest)}
-              />
+              <LatestSessionCard project={latest} owner={ownerOf(latest)} {...cardActions(latest)} />
             )}
 
             <section aria-label="Bibliothèque des manuscrits" className="flex flex-col gap-gutter-md">
@@ -237,25 +374,39 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
                 <h2 className="font-mono text-code-sm uppercase tracking-wider text-on-surface-variant tabular-nums">
                   {filtering ? 'Résultats' : 'Bibliothèque'} ({library.length})
                 </h2>
-                <div className="flex items-center gap-1.5" role="radiogroup" aria-label="Filtrer par moteur">
-                  {ENGINE_FILTERS.map((f) => (
-                    <button
-                      key={f.id}
-                      type="button"
-                      role="radio"
-                      aria-checked={engine === f.id}
-                      onClick={() => setEngine(f.id)}
-                      className={cx(
-                        'h-6 px-2.5 rounded-lg text-label-md transition-colors duration-100',
-                        f.id !== 'all' && 'font-mono font-normal',
-                        engine === f.id
-                          ? 'bg-surface-container text-on-surface'
-                          : 'text-on-surface-variant hover:text-on-surface'
-                      )}
-                    >
-                      {f.label}
-                    </button>
-                  ))}
+                <div className="flex flex-wrap items-center gap-3">
+                  <select
+                    value={sort}
+                    onChange={(e) => setSort(e.target.value as SortMode)}
+                    aria-label="Trier les projets"
+                    className="h-6 pl-2 pr-1 rounded-lg bg-transparent border border-outline-variant text-label-md text-on-surface-variant hover:text-on-surface focus:outline-none focus:border-outline transition-colors duration-100"
+                  >
+                    {SORT_MODES.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.label}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="flex items-center gap-1.5" role="radiogroup" aria-label="Filtrer par moteur">
+                    {ENGINE_FILTERS.map((f) => (
+                      <button
+                        key={f.id}
+                        type="button"
+                        role="radio"
+                        aria-checked={engine === f.id}
+                        onClick={() => setEngine(f.id)}
+                        className={cx(
+                          'h-6 px-2.5 rounded-lg text-label-md transition-colors duration-100',
+                          f.id !== 'all' && 'font-mono font-normal',
+                          engine === f.id
+                            ? 'bg-surface-container text-on-surface'
+                            : 'text-on-surface-variant hover:text-on-surface'
+                        )}
+                      >
+                        {f.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
 
@@ -267,12 +418,7 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
                 <ul className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-gutter-md">
                   {library.map((p) => (
                     <li key={p.id}>
-                      <ProjectCard
-                        project={p}
-                        owner={ownerOf(p)}
-                        onOpen={() => onOpenProject(p.id)}
-                        onDelete={(e) => void handleDelete(e, p)}
-                      />
+                      <ProjectCard project={p} owner={ownerOf(p)} {...cardActions(p)} />
                     </li>
                   ))}
                 </ul>
@@ -291,11 +437,46 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
           }}
         />
       )}
+
+      {editing && (
+        <EditProjectModal
+          project={editing}
+          onClose={() => setEditing(null)}
+          onSaved={(project) => {
+            setEditing(null);
+            upsertProject(project);
+          }}
+        />
+      )}
     </AppShell>
   );
 };
 
 type Owner = { name: string; email: string } | null;
+
+interface CardActions {
+  onOpen: () => void;
+  onDelete: (e: React.MouseEvent) => void;
+  onTogglePin: (e: React.MouseEvent) => void;
+  onDuplicate: (e: React.MouseEvent) => void;
+  onEdit: (e: React.MouseEvent) => void;
+}
+
+const PinButton: React.FC<{ pinned: boolean; size?: 'sm' | 'md'; onClick: (e: React.MouseEvent) => void }> = ({
+  pinned,
+  size = 'sm',
+  onClick,
+}) => (
+  <IconButton
+    size={size}
+    label={pinned ? 'Désépingler' : 'Épingler en tête de la bibliothèque'}
+    aria-pressed={pinned}
+    onClick={onClick}
+    className={cx(pinned && 'text-primary-text! hover:text-primary-text')}
+  >
+    <Pin className={size === 'sm' ? 'w-3.5 h-3.5' : 'w-4 h-4'} fill={pinned ? 'currentColor' : 'none'} />
+  </IconButton>
+);
 
 const OwnerLine: React.FC<{ owner: Owner }> = ({ owner }) =>
   owner ? (
@@ -306,12 +487,15 @@ const OwnerLine: React.FC<{ owner: Owner }> = ({ owner }) =>
   ) : null;
 
 /** Carte mise en avant : le projet modifié le plus récemment, avec un extrait du document. */
-const LatestSessionCard: React.FC<{
-  project: ProjectSummary;
-  owner: Owner;
-  onOpen: () => void;
-  onDelete: (e: React.MouseEvent) => void;
-}> = ({ project: p, owner, onOpen, onDelete }) => {
+const LatestSessionCard: React.FC<{ project: ProjectSummary; owner: Owner } & CardActions> = ({
+  project: p,
+  owner,
+  onOpen,
+  onDelete,
+  onTogglePin,
+  onDuplicate,
+  onEdit,
+}) => {
   const [excerpt, setExcerpt] = useState<LatexExcerpt | null>(null);
 
   useEffect(() => {
@@ -374,9 +558,18 @@ const LatestSessionCard: React.FC<{
           >
             .zip
           </Button>
-          <IconButton tone="danger" label="Supprimer le projet" onClick={onDelete}>
-            <Trash2 className="w-4 h-4" />
-          </IconButton>
+          <span className="flex items-center gap-1">
+            <PinButton pinned={p.pinned} size="md" onClick={onTogglePin} />
+            <IconButton label="Renommer / modifier la description" onClick={onEdit}>
+              <Pencil className="w-4 h-4" />
+            </IconButton>
+            <IconButton label="Dupliquer le projet" onClick={onDuplicate}>
+              <Copy className="w-4 h-4" />
+            </IconButton>
+            <IconButton tone="danger" label="Supprimer le projet" onClick={onDelete}>
+              <Trash2 className="w-4 h-4" />
+            </IconButton>
+          </span>
         </div>
       </div>
 
@@ -410,12 +603,15 @@ const LatestSessionCard: React.FC<{
   );
 };
 
-const ProjectCard: React.FC<{
-  project: ProjectSummary;
-  owner: Owner;
-  onOpen: () => void;
-  onDelete: (e: React.MouseEvent) => void;
-}> = ({ project: p, owner, onOpen, onDelete }) => (
+const ProjectCard: React.FC<{ project: ProjectSummary; owner: Owner } & CardActions> = ({
+  project: p,
+  owner,
+  onOpen,
+  onDelete,
+  onTogglePin,
+  onDuplicate,
+  onEdit,
+}) => (
   <article
     role="link"
     tabIndex={0}
@@ -446,6 +642,13 @@ const ProjectCard: React.FC<{
         {shortDateFormat.format(p.updatedAt)} • {p.fileCount} fich.
       </span>
       <span className="flex items-center gap-1 text-on-surface-variant">
+        <PinButton pinned={p.pinned} onClick={onTogglePin} />
+        <IconButton size="sm" label="Renommer / modifier la description" onClick={onEdit}>
+          <Pencil className="w-3.5 h-3.5" />
+        </IconButton>
+        <IconButton size="sm" label="Dupliquer le projet" onClick={onDuplicate}>
+          <Copy className="w-3.5 h-3.5" />
+        </IconButton>
         <IconButton
           size="sm"
           label="Exporter en .zip"
@@ -572,6 +775,71 @@ const CreateProjectModal: React.FC<{
           </Button>
           <Button type="submit" variant="primary" loading={creating} disabled={creating}>
             {creating ? 'Création...' : 'Créer et ouvrir'}
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  );
+};
+
+const EditProjectModal: React.FC<{
+  project: ProjectSummary;
+  onClose: () => void;
+  onSaved: (project: ProjectSummary) => void;
+}> = ({ project, onClose, onSaved }) => {
+  const nameId = useId();
+  const descId = useId();
+  const [name, setName] = useState(project.name);
+  const [desc, setDesc] = useState(project.description);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!name.trim()) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await api.projects.update(project.id, { name: name.trim(), description: desc.trim() });
+      onSaved(res.project);
+    } catch (err) {
+      setError(errorMessage(err, 'Enregistrement impossible.'));
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal title="Modifier le projet" onClose={onClose}>
+      <form onSubmit={handleSave} className="space-y-gutter-md">
+        <Field label="Titre du projet" htmlFor={nameId}>
+          <input
+            id={nameId}
+            type="text"
+            required
+            maxLength={120}
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            className={inputClass}
+          />
+        </Field>
+        <Field label="Description (optionnelle)" htmlFor={descId}>
+          <input
+            id={descId}
+            type="text"
+            maxLength={500}
+            value={desc}
+            onChange={(e) => setDesc(e.target.value)}
+            placeholder="Notes ou objectif du document..."
+            className={inputClass}
+          />
+        </Field>
+        {error && <Alert>{error}</Alert>}
+        <div className="flex items-center justify-end gap-2 pt-gutter-md border-t border-outline-variant">
+          <Button variant="ghost" onClick={onClose}>
+            Annuler
+          </Button>
+          <Button type="submit" variant="primary" loading={saving} disabled={saving || !name.trim()}>
+            Enregistrer
           </Button>
         </div>
       </form>
