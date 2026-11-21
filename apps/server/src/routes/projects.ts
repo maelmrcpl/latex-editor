@@ -27,6 +27,7 @@ import {
   writeProjectFileDisk,
 } from '../storage.js';
 import { getTemplateFiles } from '../templates.js';
+import { guessCompiler, pickRootFile, readImportArchive } from '../importArchive.js';
 
 const VALID_COMPILERS = new Set<CompilerEngine>(['pdflatex', 'xelatex', 'lualatex']);
 const VALID_TEMPLATES = new Set<ProjectTemplateId>(['article', 'report-fr', 'beamer', 'blank']);
@@ -57,13 +58,40 @@ function checkQuota(projectId: string, deltaBytes: number): string | null {
        WHERE p.id = ? LIMIT 1`
     )
     .get(projectId) as { id: string; role: string } | undefined;
-  const quota = owner ? getQuotaBytesForRole(owner.role) : null;
-  if (!owner || quota === null) return null;
-  const used = getUserStorageBytes(owner.id);
+  return owner ? checkUserQuota(owner, deltaBytes) : null;
+}
+
+/** Même contrôle, pour un utilisateur donné (nouveau projet importé ou dupliqué). */
+function checkUserQuota(user: { id: string; role: string }, deltaBytes: number): string | null {
+  const quota = getQuotaBytesForRole(user.role);
+  if (deltaBytes <= 0 || quota === null) return null;
+  const used = getUserStorageBytes(user.id);
   if (used + deltaBytes > quota) {
     return `Quota de stockage dépassé (${formatMb(used)} utilisés sur ${formatMb(quota)}).`;
   }
   return null;
+}
+
+const insertFileStmt = db.prepare(
+  `INSERT INTO project_files (id, project_id, path, is_binary, mime_type, size, updated_at)
+   VALUES (?, ?, ?, ?, ?, ?, ?)`
+);
+
+/** Écrit un fichier sur disque et l'enregistre dans un projet qui ne le contient pas encore. */
+function addNewProjectFile(projectId: string, cleanPath: string, data: Buffer | string, now: number): void {
+  const size = writeProjectFileDisk(projectId, cleanPath, data);
+  const meta = detectFileMetadata(cleanPath, typeof data === 'string' ? undefined : data);
+  insertFileStmt.run(randomUUID(), projectId, cleanPath, meta.isBinary ? 1 : 0, meta.mimeType, size, now);
+}
+
+/** Supprime un projet à moitié créé (import ou duplication interrompus). */
+function discardProject(projectId: string): void {
+  db.prepare('DELETE FROM projects WHERE id = ?').run(projectId);
+  try {
+    fs.rmSync(getProjectDir(projectId), { recursive: true, force: true });
+  } catch {
+    // Rien à nettoyer
+  }
 }
 
 function existingFileSize(projectId: string, cleanPath: string): number {
@@ -93,6 +121,7 @@ interface DbProjectRow {
   created_at: number;
   updated_at: number;
   owner_id: string | null;
+  pinned: number;
   file_count?: number;
   owner_email?: string | null;
   owner_name?: string | null;
@@ -118,6 +147,7 @@ function mapProjectSummary(row: DbProjectRow): ProjectSummary {
     fileCount: row.file_count ?? 0,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    pinned: Boolean(row.pinned),
     owner: row.owner_id
       ? { id: row.owner_id, email: row.owner_email ?? '', name: row.owner_name ?? '' }
       : null,
@@ -126,6 +156,78 @@ function mapProjectSummary(row: DbProjectRow): ProjectSummary {
 
 export const projectRoutes = new Hono<{ Variables: AppVariables }>();
 projectRoutes.use('*', requireAuth, requireApproved);
+
+// Import a project from a .zip archive.
+// Déclarée avant le contrôle d'accès « /:id », qui prendrait « import » pour un identifiant de projet.
+projectRoutes.post('/import', uploadBodyLimit, async (c) => {
+  const formData = await c.req.formData().catch(() => null);
+  const archive = formData?.get('archive');
+  if (!(archive instanceof File)) {
+    return c.json({ error: 'Archive .zip manquante.' }, 400);
+  }
+
+  let entries: Array<{ path: string; data: Uint8Array }>;
+  try {
+    entries = readImportArchive(new Uint8Array(await archive.arrayBuffer()));
+  } catch (err) {
+    return c.json({ error: (err as Error).message }, 400);
+  }
+
+  const rootFile = pickRootFile(entries);
+  if (!rootFile) {
+    return c.json({ error: "L'archive ne contient aucun fichier .tex." }, 400);
+  }
+
+  const user = c.get('user');
+  const quotaError = checkUserQuota(
+    user,
+    entries.reduce((sum, e) => sum + e.data.byteLength, 0)
+  );
+  if (quotaError) {
+    return c.json({ error: quotaError }, 413);
+  }
+
+  const nameRaw = formData?.get('name');
+  const name =
+    (typeof nameRaw === 'string' && nameRaw.trim()) ||
+    archive.name.replace(/\.zip$/i, '').trim() ||
+    'Projet importé';
+  const projectId = randomUUID();
+  const now = Date.now();
+  const compiler = guessCompiler(entries);
+
+  db.prepare(
+    `INSERT INTO projects (id, name, description, root_file, compiler, owner_id, created_at, updated_at)
+     VALUES (?, ?, '', ?, ?, ?, ?, ?)`
+  ).run(projectId, name.slice(0, 120), rootFile, compiler, user.id, now, now);
+
+  try {
+    for (const entry of entries) {
+      addNewProjectFile(projectId, entry.path, Buffer.from(entry.data), now);
+    }
+  } catch {
+    discardProject(projectId);
+    return c.json({ error: "Impossible d'enregistrer les fichiers de l'archive." }, 500);
+  }
+
+  return c.json(
+    {
+      project: {
+        id: projectId,
+        name: name.slice(0, 120),
+        description: '',
+        rootFile,
+        compiler,
+        fileCount: entries.length,
+        createdAt: now,
+        updatedAt: now,
+        pinned: false,
+        owner: { id: user.id, email: user.email, name: user.name },
+      } satisfies ProjectSummary,
+    },
+    201
+  );
+});
 
 /**
  * Contrôle d'accès : un utilisateur n'accède qu'à ses propres projets, un admin à tous.
@@ -191,25 +293,9 @@ projectRoutes.post('/', jsonBodyLimit, async (c) => {
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(projectId, name, description, tpl.rootFile, compiler, user.id, now, now);
 
-  const insertFile = db.prepare(
-    `INSERT INTO project_files (id, project_id, path, is_binary, mime_type, size, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
-  );
-
   const entries = Object.entries(tpl.files);
   for (const [relPath, content] of entries) {
-    const cleanPath = normalizeProjectPath(relPath);
-    const size = writeProjectFileDisk(projectId, cleanPath, content);
-    const meta = detectFileMetadata(cleanPath);
-    insertFile.run(
-      randomUUID(),
-      projectId,
-      cleanPath,
-      meta.isBinary ? 1 : 0,
-      meta.mimeType,
-      size,
-      now
-    );
+    addNewProjectFile(projectId, normalizeProjectPath(relPath), content, now);
   }
 
   return c.json(
@@ -223,8 +309,75 @@ projectRoutes.post('/', jsonBodyLimit, async (c) => {
         fileCount: entries.length,
         createdAt: now,
         updatedAt: now,
+        pinned: false,
         owner: { id: user.id, email: user.email, name: user.name },
       } satisfies ProjectSummary,
+    },
+    201
+  );
+});
+
+// Duplicate a project (the copy belongs to the current user)
+projectRoutes.post('/:id/duplicate', (c) => {
+  const sourceId = c.req.param('id');
+  const source = db.prepare('SELECT * FROM projects WHERE id = ? LIMIT 1').get(sourceId) as
+    | DbProjectRow
+    | undefined;
+  if (!source) {
+    return c.json({ error: 'Projet introuvable.' }, 404);
+  }
+  const fileRows = db
+    .prepare('SELECT path, size FROM project_files WHERE project_id = ? ORDER BY path ASC')
+    .all(sourceId) as unknown as Array<{ path: string; size: number }>;
+
+  const user = c.get('user');
+  const quotaError = checkUserQuota(
+    user,
+    fileRows.reduce((sum, f) => sum + f.size, 0)
+  );
+  if (quotaError) {
+    return c.json({ error: quotaError }, 413);
+  }
+
+  const projectId = randomUUID();
+  const now = Date.now();
+  const name = `${source.name} (copie)`.slice(0, 120);
+  db.prepare(
+    `INSERT INTO projects (id, name, description, root_file, compiler, owner_id, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(projectId, name, source.description, source.root_file, source.compiler, user.id, now, now);
+
+  let copied = 0;
+  try {
+    for (const row of fileRows) {
+      let buf: Buffer;
+      try {
+        buf = readProjectFileDisk(sourceId, row.path);
+      } catch {
+        continue; // fichier absent du disque : on l'ignore, comme l'export .zip
+      }
+      addNewProjectFile(projectId, row.path, buf, now);
+      copied++;
+    }
+  } catch {
+    discardProject(projectId);
+    return c.json({ error: 'Impossible de dupliquer le projet.' }, 500);
+  }
+
+  return c.json(
+    {
+      project: mapProjectSummary({
+        ...source,
+        id: projectId,
+        name,
+        owner_id: user.id,
+        owner_email: user.email,
+        owner_name: user.name,
+        pinned: 0,
+        created_at: now,
+        updated_at: now,
+        file_count: copied,
+      }),
     },
     201
   );
@@ -319,7 +472,8 @@ projectRoutes.patch('/:id', jsonBodyLimit, async (c) => {
   const projectId = c.req.param('id');
   const existing = db
     .prepare(
-      `SELECT p.*, u.email AS owner_email, u.name AS owner_name
+      `SELECT p.*, u.email AS owner_email, u.name AS owner_name,
+              (SELECT COUNT(*) FROM project_files f WHERE f.project_id = p.id) AS file_count
        FROM projects p LEFT JOIN users u ON u.id = p.owner_id
        WHERE p.id = ? LIMIT 1`
     )
@@ -345,13 +499,19 @@ projectRoutes.patch('/:id', jsonBodyLimit, async (c) => {
   const compiler: CompilerEngine = VALID_COMPILERS.has(body.compiler)
     ? body.compiler
     : existing.compiler;
+  const pinned = typeof body.pinned === 'boolean' ? Number(body.pinned) : existing.pinned;
 
-  const now = Date.now();
+  // Épingler ne compte pas comme une modification : le projet garde sa place de « dernière session »
+  const contentChanged =
+    typeof body === 'object' &&
+    body !== null &&
+    ['name', 'description', 'rootFile', 'compiler'].some((k) => k in body);
+  const updatedAt = contentChanged ? Date.now() : existing.updated_at;
   db.prepare(
     `UPDATE projects
-     SET name = ?, description = ?, root_file = ?, compiler = ?, updated_at = ?
+     SET name = ?, description = ?, root_file = ?, compiler = ?, pinned = ?, updated_at = ?
      WHERE id = ?`
-  ).run(name, description, rootFile, compiler, now, projectId);
+  ).run(name, description, rootFile, compiler, pinned, updatedAt, projectId);
 
   return c.json({
     project: mapProjectSummary({
@@ -360,7 +520,8 @@ projectRoutes.patch('/:id', jsonBodyLimit, async (c) => {
       description,
       root_file: rootFile,
       compiler,
-      updated_at: now,
+      pinned,
+      updated_at: updatedAt,
     }),
   });
 });

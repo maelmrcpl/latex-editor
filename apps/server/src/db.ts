@@ -89,6 +89,11 @@ if (!tableColumns('projects').has('owner_id')) {
 }
 db.exec('CREATE INDEX IF NOT EXISTS idx_projects_owner ON projects(owner_id);');
 
+// Projets épinglés en tête de la bibliothèque
+if (!tableColumns('projects').has('pinned')) {
+  db.exec('ALTER TABLE projects ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;');
+}
+
 export function claimOrphanProjects(adminUserId: string): void {
   db.prepare('UPDATE projects SET owner_id = ? WHERE owner_id IS NULL').run(adminUserId);
 }

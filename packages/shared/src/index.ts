@@ -50,6 +50,8 @@ export interface ProjectSummary {
   fileCount: number;
   createdAt: number;
   updatedAt: number;
+  /** Épinglé en tête de la bibliothèque */
+  pinned: boolean;
   /** Propriétaire du projet (renseigné pour les admins, qui voient tous les projets) */
   owner?: ProjectOwner | null;
 }

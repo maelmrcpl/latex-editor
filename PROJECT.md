@@ -91,7 +91,15 @@ Affiché à un utilisateur connecté dont le compte n'est pas validé.
 
 ### 3.3 Liste des projets
 - **Chargement** : message « Chargement des projets... ».
-- **Aucun projet** : état vide avec titre « Aucun projet pour le moment », texte d'invitation (« Crée ton premier article scientifique, mémoire ou présentation Beamer ») et bouton **« Créer un projet »**.
+- **Aucun projet** : état vide avec titre « Aucun projet pour le moment », texte d'invitation (« Crée ton premier article scientifique, mémoire ou présentation Beamer ») et boutons **« Créer un projet »** et **« Importer un .zip »**.
+- **Recherche** (`Ctrl+K` / `⌘K`) sur le nom, la description et le propriétaire ; **filtre par moteur** ; **tri** : modifiés récemment, nom, date de création. Les projets épinglés restent en tête quel que soit le tri.
+- **Importer** : bouton qui crée un projet depuis une archive `.zip` (par exemple un export Overleaf) puis l'ouvre :
+  - le nom du projet reprend celui de l'archive ;
+  - si tout le contenu est dans un seul dossier, ce dossier est retiré ;
+  - le fichier principal est détecté (`.tex` contenant `\documentclass`, en préférant `main.tex` et le moins profond) ;
+  - le moteur est deviné (fontspec / polyglossia → XeLaTeX, code Lua → LuaLaTeX, sinon pdfLaTeX) ;
+  - les fichiers système et de compilation (`__MACOSX`, `.DS_Store`, `.aux`, `.log`…) sont ignorés ;
+  - erreurs affichées : archive illisible, vide, sans `.tex`, trop de fichiers, fichier ou archive trop volumineux, quota dépassé.
 - **Grille de cartes projet**, chaque carte affiche :
   - nom du projet ;
   - moteur de compilation (pdflatex / xelatex / lualatex) ;
@@ -99,6 +107,9 @@ Affiché à un utilisateur connecté dont le compte n'est pas validé.
   - description, ou « Aucune description » ;
   - date et heure de dernière modification ;
   - nombre de fichiers (« N fich. ») ;
+  - action **Épingler / Désépingler** (n'affecte pas la date de modification) ;
+  - action **Renommer / modifier la description** (fenêtre avec titre et description) ;
+  - action **Dupliquer le projet** : crée « Nom (copie) » avec tous les fichiers, dans le quota de l'utilisateur ;
   - action **Exporter en .zip** (téléchargement du projet complet) ;
   - action **Supprimer le projet** (avec confirmation « Supprimer définitivement le projet "…" ? ») ; la jauge de stockage se met à jour après suppression.
 - Cliquer sur une carte ouvre le projet dans l'espace de travail.

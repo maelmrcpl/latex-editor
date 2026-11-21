@@ -26,6 +26,9 @@ Contrairement à Overleaf qui exécute TeX Live sur le serveur (plusieurs Go de 
   - Bouton / raccourci SyncTeX dans l'éditeur → scrolle et met en surbrillance la ligne correspondante dans le PDF.
 - **Recherche bibliographique intégrée (arXiv & Crossref)** :
   - Recherche en direct par titre, auteur, DOI ou identifiant arXiv, ajout sans doublon à `references.bib` et insertion de `\cite{cle}` en un clic.
+- **Gestion des projets** :
+  - Import d'un projet depuis une archive `.zip` (par exemple un export Overleaf) : fichier principal et moteur détectés automatiquement, fichiers de compilation ignorés.
+  - Export `.zip`, duplication, renommage et description, épinglage en tête de la bibliothèque, tri (récents, nom, création), recherche et filtre par moteur.
 
 ---
 

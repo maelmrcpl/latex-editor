@@ -81,12 +81,25 @@ export const api = {
         description: string;
         rootFile: string;
         compiler: CompilerEngine;
+        pinned: boolean;
       }>
     ) =>
       requestJson<{ project: ProjectSummary }>(`/api/projects/${id}`, {
         method: 'PATCH',
         body: JSON.stringify(payload),
       }),
+    duplicate: (id: string) =>
+      requestJson<{ project: ProjectSummary }>(`/api/projects/${id}/duplicate`, {
+        method: 'POST',
+      }),
+    importZip: (archive: File) => {
+      const form = new FormData();
+      form.set('archive', archive);
+      return requestJson<{ project: ProjectSummary }>('/api/projects/import', {
+        method: 'POST',
+        body: form,
+      });
+    },
     delete: (id: string) =>
       requestJson<{ ok: boolean }>(`/api/projects/${id}`, {
         method: 'DELETE',
