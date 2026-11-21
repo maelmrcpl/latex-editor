@@ -439,7 +439,8 @@ export const syntexEditorTheme = EditorView.theme({
   },
   '.cm-scroller': {
     fontFamily: 'var(--font-mono)',
-    lineHeight: '28px',
+    // 28 px pour la taille par défaut (13 px), proportionnel aux autres tailles
+    lineHeight: 'calc(var(--sx-editor-font-size, 13px) * 28 / 13)',
   },
   '.cm-content': {
     caretColor: 'var(--sx-primary)',

@@ -422,9 +422,14 @@ projectRoutes.get('/:id', (c) => {
     };
   });
 
+  const folderRows = db
+    .prepare('SELECT path FROM project_folders WHERE project_id = ? ORDER BY path ASC')
+    .all(projectId) as unknown as Array<{ path: string }>;
+
   const detail: ProjectDetail = {
     ...mapProjectSummary({ ...projectRow, file_count: files.length }),
     files,
+    folders: folderRows.map((r) => r.path),
   };
 
   return c.json({ project: detail });
@@ -687,6 +692,48 @@ projectRoutes.post('/:id/upload', uploadBodyLimit, async (c) => {
   return c.json({ files: uploaded });
 });
 
+// Create an (empty) folder
+projectRoutes.post('/:id/folders', jsonBodyLimit, async (c) => {
+  const projectId = c.req.param('id');
+  const body = await c.req.json().catch(() => ({}));
+  let cleanPath: string;
+  try {
+    cleanPath = normalizeProjectPath(body?.path);
+  } catch (err) {
+    return c.json({ error: (err as Error).message }, 400);
+  }
+
+  const taken = db
+    .prepare(
+      `SELECT 1 FROM project_files WHERE project_id = ? AND (path = ? OR path LIKE ? ESCAPE '!')
+       UNION ALL
+       SELECT 1 FROM project_folders WHERE project_id = ? AND path = ?
+       LIMIT 1`
+    )
+    .get(projectId, cleanPath, `${escapeLike(cleanPath)}/%`, projectId, cleanPath);
+  if (taken) {
+    return c.json({ error: 'Un fichier ou dossier porte déjà ce nom.' }, 409);
+  }
+  // Un fichier ne peut pas servir de dossier parent
+  const segments = cleanPath.split('/');
+  for (let i = 1; i < segments.length; i++) {
+    const parent = segments.slice(0, i).join('/');
+    if (db.prepare('SELECT 1 FROM project_files WHERE project_id = ? AND path = ?').get(projectId, parent)) {
+      return c.json({ error: `« ${parent} » est un fichier, pas un dossier.` }, 409);
+    }
+  }
+
+  fs.mkdirSync(resolveSafeProjectFilePath(projectId, cleanPath), { recursive: true });
+  const now = Date.now();
+  db.prepare('INSERT INTO project_folders (project_id, path, created_at) VALUES (?, ?, ?)').run(
+    projectId,
+    cleanPath,
+    now
+  );
+  db.prepare('UPDATE projects SET updated_at = ? WHERE id = ?').run(now, projectId);
+  return c.json({ path: cleanPath }, 201);
+});
+
 // Rename a file or folder
 projectRoutes.post('/:id/rename', jsonBodyLimit, async (c) => {
   const projectId = c.req.param('id');
@@ -740,6 +787,19 @@ projectRoutes.post('/:id/rename', jsonBodyLimit, async (c) => {
     updateStmt.run(updatedRel, now, row.id);
   }
 
+  const affectedFolders = db
+    .prepare(
+      `SELECT path FROM project_folders
+       WHERE project_id = ? AND (path = ? OR path LIKE ? ESCAPE '!')`
+    )
+    .all(projectId, oldPath, `${escapeLike(oldPath)}/%`) as unknown as Array<{ path: string }>;
+  const updateFolderStmt = db.prepare(
+    'UPDATE project_folders SET path = ? WHERE project_id = ? AND path = ?'
+  );
+  for (const row of affectedFolders) {
+    updateFolderStmt.run(`${newPath}${row.path.slice(oldPath.length)}`, projectId, row.path);
+  }
+
   let updatedRoot = projectRow.root_file;
   if (updatedRoot === oldPath) {
     updatedRoot = newPath;
@@ -770,6 +830,10 @@ projectRoutes.delete('/:id/files', (c) => {
   deleteProjectPathDisk(projectId, cleanPath);
   db.prepare(
     `DELETE FROM project_files
+     WHERE project_id = ? AND (path = ? OR path LIKE ? ESCAPE '!')`
+  ).run(projectId, cleanPath, `${escapeLike(cleanPath)}/%`);
+  db.prepare(
+    `DELETE FROM project_folders
      WHERE project_id = ? AND (path = ? OR path LIKE ? ESCAPE '!')`
   ).run(projectId, cleanPath, `${escapeLike(cleanPath)}/%`);
 
@@ -834,6 +898,15 @@ projectRoutes.get('/:id/export.zip', (c) => {
     .all(projectId) as unknown as Array<{ path: string }>;
 
   const zipInput: Record<string, Uint8Array> = {};
+  // Dossiers vides : entrée « dossier/ » pour qu'ils existent à la décompression
+  const folderRows = db
+    .prepare('SELECT path FROM project_folders WHERE project_id = ?')
+    .all(projectId) as unknown as Array<{ path: string }>;
+  for (const row of folderRows) {
+    if (!fileRows.some((f) => f.path.startsWith(`${row.path}/`))) {
+      zipInput[`${row.path}/`] = new Uint8Array(0);
+    }
+  }
   for (const row of fileRows) {
     try {
       const buf = readProjectFileDisk(projectId, row.path);

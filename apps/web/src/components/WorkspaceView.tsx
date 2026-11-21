@@ -1,13 +1,16 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   ArrowLeft,
   ArrowRightLeft,
   FolderArchive,
+  Minus,
   PanelLeftClose,
   PanelLeftOpen,
   Play,
+  Plus,
   Save,
+  Settings2,
   X,
 } from 'lucide-react';
 import type {
@@ -20,13 +23,16 @@ import type {
   SyncTeXForwardResult,
 } from '@prism-latex/shared';
 import { api, ApiError } from '../lib/api';
+import { EDITOR_FONT_SIZES, useEditorPrefs } from '../lib/editorPrefs';
 import { latexCompiler, type WasmStatus } from '../lib/latexCompiler';
+import { useTheme } from '../lib/theme';
+import { countLatexWords } from '../lib/wordCount';
 import { SyncTeXMapper } from '../lib/synctex';
 import { CodeMirrorPane, type CodeMirrorHandle } from './CodeMirrorPane';
 import { DiagnosticsDrawer } from './DiagnosticsDrawer';
 import { PdfPreviewPane } from './PdfPreviewPane';
+import { QuickOpen } from './QuickOpen';
 import { SidebarExplorer } from './SidebarExplorer';
-import { SynTeXLogo } from './SynTeXLogo';
 import { useDialogs } from './ui/Dialog';
 import { Button, cx, IconButton, LoadingScreen, Spinner, StatusDot } from './ui';
 
@@ -38,6 +44,7 @@ interface WorkspaceViewProps {
 export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ projectId, onBack }) => {
   const [project, setProject] = useState<ProjectDetail | null>(null);
   const [files, setFiles] = useState<ProjectFileEntry[]>([]);
+  const [folders, setFolders] = useState<string[]>([]);
   const [activePath, setActivePath] = useState<string>('main.tex');
   const [dirtyPaths, setDirtyPaths] = useState<Set<string>>(new Set());
   const [saving, setSaving] = useState(false);
@@ -52,6 +59,9 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ projectId, onBack 
   const [editorRatio, setEditorRatio] = useState(1.25 / 2.25);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [resizing, setResizing] = useState(false);
+  const [quickOpen, setQuickOpen] = useState(false);
+  const [searchRequest, setSearchRequest] = useState(0);
+  const [editorPrefs] = useEditorPrefs();
   const dialogs = useDialogs();
 
   // Compilation & SyncTeX state
@@ -72,7 +82,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ projectId, onBack 
   >(null);
 
   const editorRef = useRef<CodeMirrorHandle | null>(null);
-  const pendingJumpLineRef = useRef<number | null>(null);
+  const pendingJumpRef = useRef<{ line: number; column?: number; length?: number } | null>(null);
   const filesLatestRef = useRef<ProjectFileEntry[]>(files);
   const dirtyLatestRef = useRef<Set<string>>(dirtyPaths);
 
@@ -91,6 +101,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ projectId, onBack 
       if (!active) return;
       setProject(detail);
       setFiles(detail.files);
+      setFolders(detail.folders ?? []);
       const initialPath =
         detail.files.find((f) => f.path === detail.rootFile)?.path ??
         detail.files[0]?.path ??
@@ -104,14 +115,32 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ projectId, onBack 
 
   // Execute pending line jump when activePath changes
   useEffect(() => {
-    if (pendingJumpLineRef.current !== null) {
-      const targetLine = pendingJumpLineRef.current;
-      pendingJumpLineRef.current = null;
+    if (pendingJumpRef.current !== null) {
+      const target = pendingJumpRef.current;
+      pendingJumpRef.current = null;
       requestAnimationFrame(() => {
-        editorRef.current?.jumpToLine(targetLine);
+        editorRef.current?.jumpToLine(target.line, target.column, target.length);
       });
     }
   }, [activePath]);
+
+  // Raccourcis globaux : Ctrl+P (ouvrir un fichier), Ctrl+Shift+F (rechercher dans le projet)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+      const key = e.key.toLowerCase();
+      if (key === 'p' && !e.shiftKey) {
+        e.preventDefault(); // sinon : impression de la page
+        setQuickOpen(true);
+      } else if (key === 'f' && e.shiftKey) {
+        e.preventDefault();
+        setSidebarOpen(true);
+        setSearchRequest((n) => n + 1);
+      }
+    };
+    window.addEventListener('keydown', onKey, { capture: true });
+    return () => window.removeEventListener('keydown', onKey, { capture: true });
+  }, []);
 
   const reportError = useCallback((err: unknown, context: string) => {
     const detail =
@@ -290,13 +319,13 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ projectId, onBack 
     });
   };
 
-  const handleSelectFile = (path: string, line?: number) => {
+  const handleSelectFile = (path: string, line?: number, column?: number, length?: number) => {
     if (path === activePath) {
-      if (line) editorRef.current?.jumpToLine(line);
+      if (line) editorRef.current?.jumpToLine(line, column, length);
       return;
     }
     if (line) {
-      pendingJumpLineRef.current = line;
+      pendingJumpRef.current = { line, column, length };
     }
     setActivePath(path);
   };
@@ -333,6 +362,15 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ projectId, onBack 
     }
   };
 
+  const handleCreateFolder = async (rawPath: string) => {
+    try {
+      const res = await api.projects.createFolder(projectId, rawPath);
+      setFolders((prev) => [...prev, res.path].sort((a, b) => a.localeCompare(b)));
+    } catch (err) {
+      reportError(err, 'Création du dossier impossible');
+    }
+  };
+
   // Un fichier par requête : ceux déjà envoyés apparaissent même si un suivant est refusé
   const handleUploadFiles = async (fileList: FileList) => {
     for (const file of Array.from(fileList)) {
@@ -360,6 +398,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ projectId, onBack 
       const refreshed = await api.projects.get(projectId);
       setProject(refreshed.project);
       setFiles(refreshed.project.files);
+      setFolders(refreshed.project.folders ?? []);
       if (activePath === oldPath) {
         setActivePath(newPath);
       } else if (activePath.startsWith(`${oldPath}/`)) {
@@ -379,6 +418,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ projectId, onBack 
       reportError(err, 'Suppression impossible');
       return;
     }
+    setFolders((prev) => prev.filter((p) => p !== targetPath && !p.startsWith(`${targetPath}/`)));
     setDirtyPaths((prev) => {
       const next = new Set(
         [...prev].filter((p) => p !== targetPath && !p.startsWith(`${targetPath}/`))
@@ -492,11 +532,18 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ projectId, onBack 
     window.addEventListener('mouseup', onUp);
   };
 
+  const activeFile = files.find((f) => f.path === activePath);
+  const activeText = activeFile && !activeFile.isBinary ? activeFile.content : undefined;
+  const isTexFile = activePath.endsWith('.tex');
+  const wordCount = useMemo(
+    () => (isTexFile && activeText !== undefined ? countLatexWords(activeText) : null),
+    [isTexFile, activeText]
+  );
+
   if (!project) {
     return <LoadingScreen label="Ouverture de l'espace de travail..." />;
   }
 
-  const activeFile = files.find((f) => f.path === activePath);
   const isDirty = dirtyPaths.size > 0;
 
   const handleBack = async () => {
@@ -539,9 +586,14 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ projectId, onBack 
             <span className="font-display text-title-md text-on-surface truncate" title={project.name}>
               {project.name}
             </span>
-            <span className="hidden lg:inline font-mono text-code-sm font-normal text-on-surface-variant truncate max-w-[260px]">
+            <button
+              type="button"
+              onClick={() => setQuickOpen(true)}
+              title="Ouvrir un autre fichier (Ctrl+P)"
+              className="hidden lg:inline font-mono text-code-sm font-normal text-on-surface-variant hover:text-on-surface truncate max-w-[260px] rounded-sm transition-colors duration-100"
+            >
               {activePath}
-            </span>
+            </button>
             <span className="hidden sm:inline-flex shrink-0" role="status">
               {saving ? (
                 <span className="inline-flex items-center gap-gutter-xs text-label-sm text-on-surface-variant">
@@ -611,6 +663,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ projectId, onBack 
           <IconButton label="Sauvegarder (Ctrl+S)" onClick={() => void flushDirtyFiles()} className="rounded-sm">
             <Save className="w-[18px] h-[18px]" />
           </IconButton>
+          <EditorSettingsMenu />
 
           <Button
             variant="primary"
@@ -665,10 +718,13 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ projectId, onBack 
             <SidebarExplorer
               projectId={projectId}
               files={files}
+              folders={folders}
               rootFile={project.rootFile}
               activePath={activePath}
+              searchRequest={searchRequest}
               onSelectFile={handleSelectFile}
               onCreateFile={handleCreateFile}
+              onCreateFolder={handleCreateFolder}
               onUploadFiles={handleUploadFiles}
               onRenamePath={handleRenamePath}
               onDeletePath={handleDeletePath}
@@ -727,11 +783,19 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ projectId, onBack 
                 }}
                 onForwardSyncShortcut={(ln) => handleForwardSync(ln)}
                 onCursorChange={(line, col) => setCursor({ line, col })}
+                lineWrapping={editorPrefs.lineWrapping}
               />
             )}
             {activeFile && !activeFile.isBinary && (
-              <div className="px-gutter-md py-gutter-xs flex items-center justify-end bg-surface-container-lowest font-mono text-code-sm font-normal text-outline tabular-nums shrink-0">
-                Ln {cursor.line}, Col {cursor.col}
+              <div className="px-gutter-md py-gutter-xs flex items-center justify-end gap-gutter-md bg-surface-container-lowest font-mono text-code-sm font-normal text-outline tabular-nums shrink-0">
+                {wordCount !== null && (
+                  <span title="Estimation pour ce fichier : préambule, commandes et formules exclus">
+                    {wordCount.toLocaleString('fr-FR')} mot{wordCount > 1 ? 's' : ''}
+                  </span>
+                )}
+                <span>
+                  Ln {cursor.line}, Col {cursor.col}
+                </span>
               </div>
             )}
           </section>
@@ -761,6 +825,115 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ projectId, onBack 
           </div>
         </div>
       </div>
+
+      {quickOpen && (
+        <QuickOpen
+          files={files}
+          activePath={activePath}
+          onClose={() => setQuickOpen(false)}
+          onSelect={(path) => {
+            setQuickOpen(false);
+            handleSelectFile(path);
+            requestAnimationFrame(() => editorRef.current?.focus());
+          }}
+        />
+      )}
+    </div>
+  );
+};
+
+/** Réglages d'affichage : thème, taille du texte et retour à la ligne de l'éditeur. */
+const EditorSettingsMenu: React.FC = () => {
+  const [open, setOpen] = useState(false);
+  const [theme, setTheme] = useTheme();
+  const [prefs, setPrefs] = useEditorPrefs();
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    window.addEventListener('mousedown', onDown);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('mousedown', onDown);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  const segment = (active: boolean) =>
+    cx(
+      'flex-1 h-7 rounded-sm text-label-md transition-colors duration-100',
+      active ? 'bg-surface-container-high text-on-surface' : 'text-on-surface-variant hover:text-on-surface'
+    );
+
+  return (
+    <div ref={rootRef} className="relative">
+      <IconButton
+        label="Réglages d'affichage"
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        active={open}
+        onClick={() => setOpen((o) => !o)}
+        className="rounded-sm"
+      >
+        <Settings2 className="w-[18px] h-[18px]" />
+      </IconButton>
+      {open && (
+        <div
+          role="dialog"
+          aria-label="Réglages d'affichage"
+          className="absolute right-0 top-full mt-gutter-xs z-40 w-64 p-gutter-md flex flex-col gap-gutter-md bg-surface border border-outline-variant rounded-xl shadow-overlay animate-surface-enter"
+        >
+          <div className="flex flex-col gap-gutter-xs">
+            <span className="text-label-sm text-on-surface-variant">Thème</span>
+            <div className="flex gap-1 p-0.5 rounded-lg bg-surface-container-low border border-outline-variant" role="radiogroup" aria-label="Thème">
+              {(['dark', 'light'] as const).map((t) => (
+                <button key={t} type="button" role="radio" aria-checked={theme === t} onClick={() => setTheme(t)} className={segment(theme === t)}>
+                  {t === 'dark' ? 'Sombre' : 'Clair'}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between gap-gutter-sm">
+            <span className="text-label-sm text-on-surface-variant">Taille du texte</span>
+            <div className="flex items-center gap-1">
+              <IconButton
+                size="sm"
+                label="Réduire la taille du texte"
+                disabled={prefs.fontSize <= EDITOR_FONT_SIZES.min}
+                onClick={() => setPrefs({ fontSize: prefs.fontSize - 1 })}
+              >
+                <Minus className="w-3.5 h-3.5" />
+              </IconButton>
+              <span className="w-10 text-center font-mono text-code-sm text-on-surface tabular-nums">{prefs.fontSize} px</span>
+              <IconButton
+                size="sm"
+                label="Agrandir la taille du texte"
+                disabled={prefs.fontSize >= EDITOR_FONT_SIZES.max}
+                onClick={() => setPrefs({ fontSize: prefs.fontSize + 1 })}
+              >
+                <Plus className="w-3.5 h-3.5" />
+              </IconButton>
+            </div>
+          </div>
+
+          <label className="flex items-center justify-between gap-gutter-sm cursor-pointer select-none">
+            <span className="text-label-sm text-on-surface-variant">Retour à la ligne automatique</span>
+            <input
+              type="checkbox"
+              checked={prefs.lineWrapping}
+              onChange={(e) => setPrefs({ lineWrapping: e.target.checked })}
+              className="w-3.5 h-3.5 accent-primary"
+            />
+          </label>
+        </div>
+      )}
     </div>
   );
 };

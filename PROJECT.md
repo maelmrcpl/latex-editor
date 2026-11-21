@@ -165,6 +165,7 @@ Affiché à un utilisateur connecté dont le compte n'est pas validé.
 - Bouton **SyncTeX éditeur → PDF** (saute de la ligne courante à l'endroit correspondant du PDF ; désactivé tant qu'aucune donnée SyncTeX n'est disponible ; raccourci `Ctrl+Shift+J`).
 - Bouton **Exporter le projet complet (.zip)**.
 - Bouton **Sauvegarder** (`Ctrl+S`).
+- Bouton **Réglages d'affichage** : thème sombre / clair, taille du texte de l'éditeur (11 à 20 px), retour à la ligne automatique ; mémorisés dans le navigateur.
 - Bouton principal **« Compiler »** (`Ctrl+Entrée`), avec indicateur d'activité et désactivé pendant la compilation.
 
 ### 4.2 Bandeau d'erreur
@@ -188,11 +189,12 @@ Raisons typiques remontées : quota de stockage atteint, fichier trop volumineux
 
 ### 4.4 Panneau latéral
 
-Trois onglets : **Fichiers**, **Plan**, **BibTeX**.
+Quatre onglets : **Fichiers**, **Plan**, **BibTeX**, **Recherche** (icône loupe).
 
 #### Onglet « Fichiers »
 - Titre de section « Arborescence ».
 - Bouton **Nouveau fichier** : demande un chemin (ex. `sections/methodologie.tex`, `references.bib`) ; les sous-dossiers sont créés automatiquement ; le fichier créé s'ouvre.
+- Bouton **Nouveau dossier** : crée un dossier, éventuellement vide (ex. `figures`, `chapitres/annexes`) ; il est conservé au rechargement et dans l'export `.zip`. Un dossier vide affiche la mention « vide ».
 - Bouton **Importer des fichiers ou images** (sélection multiple).
 - **Glisser-déposer** de fichiers/images n'importe où sur le panneau, avec retour visuel pendant le survol et mention « Glisser-déposer des images/fichiers ici ».
 - **Arborescence** des fichiers et dossiers (dossiers d'abord, puis tri alphabétique) :
@@ -204,7 +206,7 @@ Trois onglets : **Fichiers**, **Plan**, **BibTeX**.
   - **Définir comme fichier principal (root)** — uniquement pour un `.tex` qui ne l'est pas déjà ;
   - **Renommer** (demande le nouveau chemin / nom ; permet aussi de déplacer) ;
   - **Supprimer** (avec confirmation) — indisponible s'il ne reste qu'un fichier.
-- Actions au survol d'un **dossier** : **Renommer le dossier**, **Supprimer le dossier** (avec confirmation, supprime son contenu).
+- Actions au survol d'un **dossier** : **Nouveau fichier dans ce dossier**, **Nouveau sous-dossier**, **Renommer le dossier**, **Supprimer le dossier** (avec confirmation, supprime son contenu).
 
 #### Onglet « Plan »
 - Liste de toutes les divisions du document détectées dans tous les `.tex` du projet : parties, chapitres, sections, sous-sections, sous-sous-sections, hiérarchisées par niveau.
@@ -212,6 +214,13 @@ Trois onglets : **Fichiers**, **Plan**, **BibTeX**.
 - Cliquer sur une entrée ouvre le fichier et place le curseur sur la ligne.
 - État vide : « Aucune section détectée dans le projet ».
 - Mise à jour en direct pendant la frappe.
+
+#### Onglet « Recherche » (dans tout le projet)
+- Ouverture directe avec `Ctrl+Shift+F` (le panneau latéral s'ouvre si besoin et le champ prend le focus).
+- Champ de recherche (2 caractères minimum) et bouton **Respecter la casse**.
+- Résumé : « N résultats dans M fichiers » (limité à 500 résultats).
+- Résultats groupés par fichier : chemin, nombre de correspondances, puis une ligne par correspondance (numéro de ligne + extrait avec le terme mis en évidence).
+- Cliquer sur un résultat (ou `Entrée` dans le champ pour le premier) ouvre le fichier et sélectionne le terme trouvé.
 
 #### Onglet « BibTeX » (recherche bibliographique)
 - Champ de recherche : titre, auteur, DOI ou identifiant arXiv (2 caractères minimum).
@@ -250,12 +259,16 @@ Trois onglets : **Fichiers**, **Plan**, **BibTeX**.
 **Raccourcis clavier** :
 - `Ctrl+S` : sauvegarder (et compiler si « Auto » est activé) ;
 - `Ctrl+Entrée` : compiler ;
-- `Ctrl+Shift+J` : SyncTeX éditeur → PDF.
+- `Ctrl+Shift+J` : SyncTeX éditeur → PDF ;
+- `Ctrl+P` : **ouverture rapide** d'un fichier (liste filtrée par nom ou chemin, recherche approximative, flèches + `Entrée`, `Échap` pour fermer) ; aussi accessible en cliquant sur le chemin du fichier dans la barre supérieure ;
+- `Ctrl+Shift+F` : recherche dans tout le projet.
 
 **Fichier binaire** :
 - image : aperçu de l'image ;
 - autre binaire : type MIME et taille en Ko ;
 - rappel de la syntaxe pour l'utiliser : `\includegraphics{chemin}`.
+
+**Barre d'état** sous l'éditeur : nombre de mots estimé du fichier `.tex` ouvert (préambule, commandes et formules exclus) et position du curseur « Ln X, Col Y ».
 
 **Aucun fichier sélectionné** : « Sélectionne un fichier dans l'arborescence ».
 

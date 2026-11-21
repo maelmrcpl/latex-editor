@@ -69,6 +69,8 @@ export interface ProjectFileEntry {
 
 export interface ProjectDetail extends ProjectSummary {
   files: ProjectFileEntry[];
+  /** Dossiers créés explicitement (éventuellement vides), en plus de ceux déduits des fichiers */
+  folders: string[];
 }
 
 export interface ProjectBundleFile {
