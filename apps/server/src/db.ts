@@ -113,3 +113,13 @@ export function getUserStorageBytes(userId: string): number {
 export function getQuotaBytesForRole(role: string): number | null {
   return role === 'admin' || config.userQuotaBytes <= 0 ? null : config.userQuotaBytes;
 }
+
+// Dossiers créés explicitement (les autres dossiers découlent des chemins de fichiers)
+db.exec(`
+  CREATE TABLE IF NOT EXISTS project_folders (
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    path TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (project_id, path)
+  );
+`);

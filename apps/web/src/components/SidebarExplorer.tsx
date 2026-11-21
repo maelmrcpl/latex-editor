@@ -1,11 +1,13 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  CaseSensitive,
   Check,
   ChevronDown,
   ChevronRight,
   Copy,
   ExternalLink,
   FilePlus2,
+  FolderPlus,
   Pencil,
   Search,
   Star,
@@ -20,10 +22,15 @@ import { cx, IconButton, inputClass, Spinner, Tabs } from './ui';
 interface SidebarExplorerProps {
   projectId: string;
   files: ProjectFileEntry[];
+  /** Dossiers créés explicitement (éventuellement vides) */
+  folders: string[];
   rootFile: string;
   activePath: string;
-  onSelectFile: (path: string, line?: number) => void;
+  /** Change à chaque demande d'ouverture de la recherche (Ctrl+Shift+F) */
+  searchRequest?: number;
+  onSelectFile: (path: string, line?: number, column?: number, length?: number) => void;
   onCreateFile: (path: string) => Promise<void>;
+  onCreateFolder: (path: string) => Promise<void>;
   onUploadFiles: (fileList: FileList) => Promise<void>;
   onRenamePath: (oldPath: string, newPath: string) => Promise<void>;
   onDeletePath: (path: string) => Promise<void>;
@@ -39,11 +46,15 @@ interface TreeNode {
   children: TreeNode[];
 }
 
-function buildFileTree(files: ProjectFileEntry[]): TreeNode[] {
+function buildFileTree(files: ProjectFileEntry[], folders: string[]): TreeNode[] {
   const root: TreeNode[] = [];
 
-  for (const file of files) {
-    const parts = file.path.split('/');
+  const entries: Array<{ path: string; file?: ProjectFileEntry }> = [
+    ...folders.map((path) => ({ path })),
+    ...files.map((file) => ({ path: file.path, file })),
+  ];
+  for (const { path, file } of entries) {
+    const parts = path.split('/');
     let currentLevel = root;
     let accumPath = '';
 
@@ -51,14 +62,15 @@ function buildFileTree(files: ProjectFileEntry[]): TreeNode[] {
       const part = parts[i];
       accumPath = accumPath ? `${accumPath}/${part}` : part;
       const isLast = i === parts.length - 1;
+      const isFolder = !isLast || !file;
 
-      let existing = currentLevel.find((n) => n.name === part && n.isFolder === !isLast);
+      let existing = currentLevel.find((n) => n.name === part && n.isFolder === isFolder);
       if (!existing) {
         existing = {
           name: part,
           path: accumPath,
-          isFolder: !isLast,
-          file: isLast ? file : undefined,
+          isFolder,
+          file: isFolder ? undefined : file,
           children: [],
         };
         currentLevel.push(existing);
@@ -117,12 +129,72 @@ function extractOutline(files: ProjectFileEntry[]): OutlineItem[] {
   return items;
 }
 
+interface SearchMatch {
+  line: number;
+  /** Colonne de début (base 1) */
+  column: number;
+  length: number;
+  text: string;
+}
+
+const MAX_SEARCH_MATCHES = 500;
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** Recherche plein texte dans les fichiers texte chargés du projet. */
+function searchProject(
+  files: ProjectFileEntry[],
+  query: string,
+  caseSensitive: boolean
+): { groups: Array<{ path: string; matches: SearchMatch[] }>; total: number; truncated: boolean } {
+  const groups: Array<{ path: string; matches: SearchMatch[] }> = [];
+  let total = 0;
+  const re = new RegExp(escapeRegExp(query), caseSensitive ? 'g' : 'gi');
+  for (const f of [...files].sort((a, b) => a.path.localeCompare(b.path))) {
+    if (f.isBinary || !f.content) continue;
+    const matches: SearchMatch[] = [];
+    const lines = f.content.split(/\r?\n/);
+    for (let i = 0; i < lines.length && total < MAX_SEARCH_MATCHES; i++) {
+      re.lastIndex = 0;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(lines[i])) && total < MAX_SEARCH_MATCHES) {
+        matches.push({ line: i + 1, column: m.index + 1, length: m[0].length, text: lines[i] });
+        total++;
+      }
+    }
+    if (matches.length > 0) groups.push({ path: f.path, matches });
+    if (total >= MAX_SEARCH_MATCHES) return { groups, total, truncated: true };
+  }
+  return { groups, total, truncated: false };
+}
+
+/** Ligne de résultat : extrait centré sur la correspondance, mise en évidence. */
+const SearchExcerpt: React.FC<{ match: SearchMatch }> = ({ match }) => {
+  const start = match.column - 1;
+  const from = Math.max(0, start - 12);
+  const before = (from > 0 ? '…' : '') + match.text.slice(from, start).trimStart();
+  const hit = match.text.slice(start, start + match.length);
+  const after = match.text.slice(start + match.length, start + match.length + 80);
+  return (
+    <span className="truncate">
+      {before}
+      <mark className="bg-primary-container text-on-primary-container rounded-[2px]">{hit}</mark>
+      {after}
+    </span>
+  );
+};
+
 export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
   files,
+  folders,
   rootFile,
   activePath,
+  searchRequest,
   onSelectFile,
   onCreateFile,
+  onCreateFolder,
   onUploadFiles,
   onRenamePath,
   onDeletePath,
@@ -130,7 +202,7 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
   onInsertCitation,
 }) => {
   const dialogs = useDialogs();
-  const [tab, setTab] = useState<'files' | 'outline' | 'citations'>('files');
+  const [tab, setTab] = useState<'files' | 'outline' | 'citations' | 'search'>('files');
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set());
   const [dragOver, setDragOver] = useState(false);
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
@@ -143,8 +215,36 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [insertedId, setInsertedId] = useState<string | null>(null);
 
-  const tree = useMemo(() => buildFileTree(files), [files]);
+  // Recherche dans le projet
+  const [searchQuery, setSearchQuery] = useState('');
+  const [caseSensitive, setCaseSensitive] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const deferredQuery = useDeferredValue(searchQuery);
+  const deferredFiles = useDeferredValue(files);
+
+  const tree = useMemo(() => buildFileTree(files, folders), [files, folders]);
   const outline = useMemo(() => extractOutline(files), [files]);
+  const searchResults = useMemo(
+    () =>
+      tab === 'search' && deferredQuery.length >= 2
+        ? searchProject(deferredFiles, deferredQuery, caseSensitive)
+        : null,
+    [tab, deferredFiles, deferredQuery, caseSensitive]
+  );
+
+  // Ctrl+Shift+F : bascule sur l'onglet Recherche puis donne le focus au champ, une fois affiché
+  const focusSearchRef = useRef(false);
+  useEffect(() => {
+    if (!searchRequest) return;
+    focusSearchRef.current = true;
+    setTab('search');
+  }, [searchRequest]);
+  useEffect(() => {
+    if (tab !== 'search' || !focusSearchRef.current) return;
+    focusSearchRef.current = false;
+    searchInputRef.current?.focus();
+    searchInputRef.current?.select();
+  }, [tab, searchRequest]);
 
   const toggleFolder = (folderPath: string) => {
     setCollapsedFolders((prev) => {
@@ -155,17 +255,37 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
     });
   };
 
-  const handlePromptNewFile = async () => {
+  const handlePromptNewFile = async (folder?: string) => {
     const raw = await dialogs.prompt({
       title: 'Nouveau fichier',
       message: 'Les sous-dossiers sont créés automatiquement.',
       label: 'Chemin du fichier',
-      defaultValue: 'sections/nouvelle-section.tex',
+      defaultValue: folder ? `${folder}/nouveau.tex` : 'sections/nouvelle-section.tex',
       placeholder: 'sections/methodologie.tex ou references.bib',
       confirmLabel: 'Créer',
     });
     if (!raw) return;
     await onCreateFile(raw);
+  };
+
+  const handlePromptNewFolder = async (parent?: string) => {
+    const raw = await dialogs.prompt({
+      title: 'Nouveau dossier',
+      message: 'Indique un chemin pour créer des sous-dossiers (ex. chapitres/annexes).',
+      label: 'Chemin du dossier',
+      defaultValue: parent ? `${parent}/nouveau-dossier` : 'nouveau-dossier',
+      placeholder: 'figures ou chapitres/annexes',
+      confirmLabel: 'Créer',
+    });
+    if (!raw) return;
+    await onCreateFolder(raw.replace(/\/+$/, ''));
+    // Déplie les dossiers parents pour montrer le nouveau dossier
+    setCollapsedFolders((prev) => {
+      const next = new Set(prev);
+      const parts = raw.split('/');
+      for (let i = 1; i < parts.length; i++) next.delete(parts.slice(0, i).join('/'));
+      return next;
+    });
   };
 
   const handlePromptRename = async (e: React.MouseEvent, currentPath: string, isFolder: boolean) => {
@@ -240,6 +360,26 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
             <span className={rowActions}>
               <IconButton
                 size="sm"
+                label="Nouveau fichier dans ce dossier"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void handlePromptNewFile(node.path);
+                }}
+              >
+                <FilePlus2 className="w-3 h-3" />
+              </IconButton>
+              <IconButton
+                size="sm"
+                label="Nouveau sous-dossier"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void handlePromptNewFolder(node.path);
+                }}
+              >
+                <FolderPlus className="w-3 h-3" />
+              </IconButton>
+              <IconButton
+                size="sm"
                 label="Renommer le dossier"
                 onClick={(e) => void handlePromptRename(e, node.path, true)}
               >
@@ -261,7 +401,13 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
               role="group"
               className="flex flex-col gap-gutter-xs mt-gutter-xs ml-gutter-sm pl-gutter-sm border-l border-outline-variant"
             >
-              {node.children.map((c) => renderNode(c))}
+              {node.children.length === 0 ? (
+                <li className="min-h-6 py-0.5 pl-gutter-sm flex items-center font-sans text-label-sm italic text-outline select-none">
+                  vide
+                </li>
+              ) : (
+                node.children.map((c) => renderNode(c))
+              )}
             </ul>
           )}
         </li>
@@ -351,6 +497,15 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
           { id: 'files', label: 'Fichiers' },
           { id: 'outline', label: 'Plan' },
           { id: 'citations', label: 'BibTeX' },
+          {
+            id: 'search',
+            label: <span className="sr-only">Rechercher dans le projet</span>,
+            icon: (
+              <span title="Rechercher dans le projet (Ctrl+Shift+F)" className="inline-flex">
+                <Search className="w-3.5 h-3.5" />
+              </span>
+            ),
+          },
         ]}
       />
 
@@ -369,6 +524,9 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
                   onClick={() => void handlePromptNewFile()}
                 >
                   <FilePlus2 className="w-3.5 h-3.5" />
+                </IconButton>
+                <IconButton size="sm" label="Nouveau dossier" onClick={() => void handlePromptNewFolder()}>
+                  <FolderPlus className="w-3.5 h-3.5" />
                 </IconButton>
                 <IconButton
                   size="sm"
@@ -404,6 +562,84 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
           <p className="px-gutter-xs text-body-sm text-on-surface-variant opacity-75">
             Glisser-déposer des fichiers ici
           </p>
+        </div>
+      )}
+
+      {/* Onglet Recherche dans le projet */}
+      {tab === 'search' && (
+        <div className="flex-1 flex flex-col gap-gutter-sm min-h-0">
+          <div className="flex items-center gap-gutter-xs">
+            <input
+              ref={searchInputRef}
+              type="search"
+              aria-label="Rechercher dans tous les fichiers"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && searchResults?.groups[0]) {
+                  const first = searchResults.groups[0];
+                  const m = first.matches[0];
+                  onSelectFile(first.path, m.line, m.column, m.length);
+                }
+              }}
+              placeholder="Rechercher dans le projet..."
+              spellCheck={false}
+              className={cx(inputClass, 'h-7 px-gutter-sm rounded-sm bg-surface-container-low text-body-sm')}
+            />
+            <IconButton
+              size="sm"
+              label="Respecter la casse"
+              aria-pressed={caseSensitive}
+              active={caseSensitive}
+              onClick={() => setCaseSensitive((v) => !v)}
+              className="w-7 h-7"
+            >
+              <CaseSensitive className="w-4 h-4" />
+            </IconButton>
+          </div>
+
+          {searchResults === null ? (
+            <p className="py-8 px-2 text-center text-body-sm text-on-surface-variant">
+              Recherche un mot ou une commande dans tous les fichiers texte du projet.
+            </p>
+          ) : searchResults.total === 0 ? (
+            <p className="py-8 px-2 text-center text-body-sm text-on-surface-variant">Aucun résultat.</p>
+          ) : (
+            <>
+              <p className="px-gutter-xs text-label-sm text-on-surface-variant tabular-nums">
+                {searchResults.truncated ? `${MAX_SEARCH_MATCHES}+` : searchResults.total} résultat
+                {searchResults.total > 1 ? 's' : ''} dans {searchResults.groups.length} fichier
+                {searchResults.groups.length > 1 ? 's' : ''}
+              </p>
+              <ul className="flex-1 overflow-y-auto flex flex-col gap-gutter-sm" aria-label="Résultats de recherche">
+                {searchResults.groups.map((group) => (
+                  <li key={group.path} className="flex flex-col">
+                    <span
+                      className="px-gutter-xs py-0.5 font-mono text-code-sm text-on-surface truncate"
+                      title={group.path}
+                    >
+                      {group.path}
+                      <span className="ml-1.5 text-outline tabular-nums">{group.matches.length}</span>
+                    </span>
+                    <ul className="flex flex-col">
+                      {group.matches.map((m) => (
+                        <li key={`${m.line}:${m.column}`}>
+                          <button
+                            type="button"
+                            onClick={() => onSelectFile(group.path, m.line, m.column, m.length)}
+                            className="w-full flex items-baseline gap-gutter-sm px-gutter-xs py-0.5 rounded-sm text-left font-mono text-code-sm font-normal text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors duration-100"
+                          >
+                            <span className="w-7 shrink-0 text-right text-outline tabular-nums">{m.line}</span>
+                            <SearchExcerpt match={m} />
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
         </div>
       )}
 

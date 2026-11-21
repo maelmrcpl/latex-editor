@@ -19,7 +19,7 @@ import {
 } from '@codemirror/language';
 import { type Diagnostic, lintGutter, setDiagnostics } from '@codemirror/lint';
 import { highlightSelectionMatches, searchKeymap } from '@codemirror/search';
-import { EditorState } from '@codemirror/state';
+import { Compartment, EditorState } from '@codemirror/state';
 import {
   drawSelection,
   EditorView,
@@ -32,9 +32,11 @@ import type { DiagnosticItem, ProjectFileEntry } from '@prism-latex/shared';
 import { createLatexExtensions } from '../lib/latexLanguage';
 
 export interface CodeMirrorHandle {
-  jumpToLine: (line: number) => void;
+  /** Va à une ligne (base 1) et la sélectionne, ou sélectionne `length` caractères à partir de `column` (base 1). */
+  jumpToLine: (line: number, column?: number, length?: number) => void;
   insertAtCursor: (text: string) => void;
   getCursorLine: () => number;
+  focus: () => void;
 }
 
 interface CodeMirrorPaneProps {
@@ -48,6 +50,8 @@ interface CodeMirrorPaneProps {
   onForwardSyncShortcut: (line: number) => void;
   /** Position du curseur (ligne, colonne), base 1 */
   onCursorChange?: (line: number, col: number) => void;
+  /** Retour à la ligne automatique des lignes longues */
+  lineWrapping?: boolean;
 }
 
 export const CodeMirrorPane = forwardRef<CodeMirrorHandle, CodeMirrorPaneProps>(
@@ -62,10 +66,14 @@ export const CodeMirrorPane = forwardRef<CodeMirrorHandle, CodeMirrorPaneProps>(
       onCompileShortcut,
       onForwardSyncShortcut,
       onCursorChange,
+      lineWrapping = true,
     },
     ref
   ) => {
     const hostRef = useRef<HTMLDivElement | null>(null);
+    const wrapCompartment = useRef(new Compartment()).current;
+    const lineWrappingRef = useRef(lineWrapping);
+    lineWrappingRef.current = lineWrapping;
     const viewRef = useRef<EditorView | null>(null);
     const filesRef = useRef<ProjectFileEntry[]>(allFiles);
     const callbacksRef = useRef({
@@ -86,13 +94,15 @@ export const CodeMirrorPane = forwardRef<CodeMirrorHandle, CodeMirrorPaneProps>(
     };
 
     useImperativeHandle(ref, () => ({
-      jumpToLine(lineNum: number) {
+      jumpToLine(lineNum: number, column?: number, length = 0) {
         const view = viewRef.current;
         if (!view) return;
         const clamped = Math.max(1, Math.min(lineNum, view.state.doc.lines));
         const line = view.state.doc.line(clamped);
+        const from = column ? Math.min(line.to, line.from + column - 1) : line.from;
+        const to = column ? Math.min(line.to, from + length) : line.to;
         view.dispatch({
-          selection: { anchor: line.from, head: line.to },
+          selection: { anchor: from, head: to },
           effects: EditorView.scrollIntoView(line.from, { y: 'center' }),
         });
         view.focus();
@@ -106,6 +116,9 @@ export const CodeMirrorPane = forwardRef<CodeMirrorHandle, CodeMirrorPaneProps>(
           selection: { anchor: sel.from + text.length },
         });
         view.focus();
+      },
+      focus() {
+        viewRef.current?.focus();
       },
       getCursorLine(): number {
         const view = viewRef.current;
@@ -132,7 +145,7 @@ export const CodeMirrorPane = forwardRef<CodeMirrorHandle, CodeMirrorPaneProps>(
           closeBrackets(),
           highlightActiveLine(),
           highlightSelectionMatches(),
-          EditorView.lineWrapping,
+          wrapCompartment.of(lineWrappingRef.current ? EditorView.lineWrapping : []),
           keymap.of([
             {
               key: 'Mod-s',
@@ -190,6 +203,12 @@ export const CodeMirrorPane = forwardRef<CodeMirrorHandle, CodeMirrorPaneProps>(
       };
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [filePath]);
+
+    useEffect(() => {
+      viewRef.current?.dispatch({
+        effects: wrapCompartment.reconfigure(lineWrapping ? EditorView.lineWrapping : []),
+      });
+    }, [lineWrapping, wrapCompartment]);
 
     // Sync external value updates (e.g. when Citations appends to references.bib while open)
     useEffect(() => {

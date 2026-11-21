@@ -111,6 +111,11 @@ export const api = {
       }
       return { files: uploaded };
     },
+    createFolder: (projectId: string, path: string) =>
+      requestJson<{ path: string }>(`/api/projects/${projectId}/folders`, {
+        method: 'POST',
+        body: JSON.stringify({ path }),
+      }),
     renamePath: (projectId: string, oldPath: string, newPath: string) =>
       requestJson<{ ok: boolean; rootFile: string }>(`/api/projects/${projectId}/rename`, {
         method: 'POST',

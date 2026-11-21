@@ -24,6 +24,10 @@ Contrairement à Overleaf qui exécute TeX Live sur le serveur (plusieurs Go de 
 - **SyncTeX bidirectionnel** :
   - `Ctrl+Clic` (ou double-clic) sur le PDF → positionne le curseur sur la ligne `.tex` correspondante.
   - Bouton / raccourci SyncTeX dans l'éditeur → scrolle et met en surbrillance la ligne correspondante dans le PDF.
+- **Confort d'écriture** :
+  - Recherche dans tout le projet (`Ctrl+Shift+F`), ouverture rapide d'un fichier (`Ctrl+P`), nombre de mots du fichier ouvert.
+  - Thème sombre ou clair, taille du texte et retour à la ligne réglables depuis l'éditeur.
+  - Création de dossiers, même vides, dans l'arborescence.
 - **Recherche bibliographique intégrée (arXiv & Crossref)** :
   - Recherche en direct par titre, auteur, DOI ou identifiant arXiv, ajout sans doublon à `references.bib` et insertion de `\cite{cle}` en un clic.
 
