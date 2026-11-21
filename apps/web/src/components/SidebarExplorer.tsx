@@ -1,20 +1,12 @@
 import React, { useMemo, useRef, useState } from 'react';
 import {
-  BookMarked,
   Check,
   ChevronDown,
   ChevronRight,
   Copy,
   ExternalLink,
-  FileCode2,
-  FileImage,
   FilePlus2,
-  FileText,
-  Folder,
-  ListTree,
-  Loader2,
   Pencil,
-  Plus,
   Search,
   Star,
   Trash2,
@@ -22,6 +14,8 @@ import {
 } from 'lucide-react';
 import type { CitationResult, ProjectFileEntry } from '@prism-latex/shared';
 import { api } from '../lib/api';
+import { useDialogs } from './ui/Dialog';
+import { cx, IconButton, inputClass, Spinner, Tabs } from './ui';
 
 interface SidebarExplorerProps {
   projectId: string;
@@ -135,6 +129,7 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
   onSetRootFile,
   onInsertCitation,
 }) => {
+  const dialogs = useDialogs();
   const [tab, setTab] = useState<'files' | 'outline' | 'citations'>('files');
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set());
   const [dragOver, setDragOver] = useState(false);
@@ -161,24 +156,45 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
   };
 
   const handlePromptNewFile = async () => {
-    const raw = window.prompt(
-      'Chemin du nouveau fichier (ex: sections/methodologie.tex ou references.bib) :',
-      'sections/nouvelle-section.tex'
-    );
-    if (!raw || !raw.trim()) return;
-    await onCreateFile(raw.trim());
+    const raw = await dialogs.prompt({
+      title: 'Nouveau fichier',
+      message: 'Les sous-dossiers sont créés automatiquement.',
+      label: 'Chemin du fichier',
+      defaultValue: 'sections/nouvelle-section.tex',
+      placeholder: 'sections/methodologie.tex ou references.bib',
+      confirmLabel: 'Créer',
+    });
+    if (!raw) return;
+    await onCreateFile(raw);
   };
 
-  const handlePromptRename = async (e: React.MouseEvent, currentPath: string) => {
+  const handlePromptRename = async (e: React.MouseEvent, currentPath: string, isFolder: boolean) => {
     e.stopPropagation();
-    const next = window.prompt('Nouveau chemin / nom :', currentPath);
-    if (!next || !next.trim() || next.trim() === currentPath) return;
-    await onRenamePath(currentPath, next.trim());
+    const next = await dialogs.prompt({
+      title: isFolder ? 'Renommer le dossier' : 'Renommer le fichier',
+      message: 'Modifie le chemin pour déplacer l’élément dans un autre dossier.',
+      label: 'Nouveau chemin / nom',
+      defaultValue: currentPath,
+      confirmLabel: 'Renommer',
+    });
+    if (!next || next === currentPath) return;
+    await onRenamePath(currentPath, next);
   };
 
-  const handlePromptDelete = async (e: React.MouseEvent, targetPath: string) => {
+  const handlePromptDelete = async (e: React.MouseEvent, targetPath: string, isFolder: boolean) => {
     e.stopPropagation();
-    if (!window.confirm(`Supprimer "${targetPath}" ?`)) return;
+    const ok = await dialogs.confirm({
+      title: isFolder ? 'Supprimer le dossier ?' : 'Supprimer le fichier ?',
+      message: (
+        <>
+          <code className="font-mono text-code-sm text-on-surface">{targetPath}</code>
+          {isFolder ? ' et tout son contenu seront supprimés.' : ' sera supprimé.'}
+        </>
+      ),
+      confirmLabel: 'Supprimer',
+      tone: 'danger',
+    });
+    if (!ok) return;
     await onDeletePath(targetPath);
   };
 
@@ -196,113 +212,114 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
     }
   };
 
-  const renderNode = (node: TreeNode, depth = 0): React.ReactNode => {
+  const rowClass = (active: boolean) =>
+    cx(
+      'group min-h-6 py-0.5 px-gutter-xs flex items-center justify-between gap-1 rounded-sm select-none cursor-pointer',
+      'transition-colors duration-100 ease-out',
+      active
+        ? 'bg-surface-container-high text-primary-text'
+        : 'text-on-surface-variant hover:bg-surface-container hover:text-on-surface'
+    );
+
+  const rowActions = 'hidden group-hover:flex group-focus-within:flex items-center shrink-0 -my-0.5';
+
+  const renderNode = (node: TreeNode): React.ReactNode => {
     if (node.isFolder) {
       const isCollapsed = collapsedFolders.has(node.path);
       return (
-        <div key={node.path}>
-          <div
-            onClick={() => toggleFolder(node.path)}
-            style={{ paddingLeft: `${depth * 12 + 10}px` }}
-            className="group h-7 pr-2 flex items-center justify-between text-xs text-zinc-300 hover:bg-zinc-900 rounded-lg cursor-pointer select-none"
-          >
-            <div className="flex items-center gap-1.5 min-w-0">
+        <li key={node.path} role="treeitem" aria-expanded={!isCollapsed}>
+          <div onClick={() => toggleFolder(node.path)} className={rowClass(false)}>
+            <span className="flex items-center gap-gutter-xs min-w-0">
               {isCollapsed ? (
-                <ChevronRight className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
+                <ChevronRight className="w-3.5 h-3.5 shrink-0" />
               ) : (
-                <ChevronDown className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
+                <ChevronDown className="w-3.5 h-3.5 shrink-0" />
               )}
-              <Folder className="w-3.5 h-3.5 text-indigo-400/80 shrink-0" />
-              <span className="truncate">{node.name}</span>
-            </div>
-            <div className="hidden group-hover:flex items-center gap-0.5">
-              <button
-                onClick={(e) => handlePromptRename(e, node.path)}
-                title="Renommer le dossier"
-                className="p-1 rounded hover:bg-zinc-800 text-zinc-400 cursor-pointer"
+              <span className="truncate">{node.name}/</span>
+            </span>
+            <span className={rowActions}>
+              <IconButton
+                size="sm"
+                label="Renommer le dossier"
+                onClick={(e) => void handlePromptRename(e, node.path, true)}
               >
                 <Pencil className="w-3 h-3" />
-              </button>
-              <button
-                onClick={(e) => handlePromptDelete(e, node.path)}
-                title="Supprimer le dossier"
-                className="p-1 rounded hover:bg-red-500/20 text-zinc-400 hover:text-red-400 cursor-pointer"
+              </IconButton>
+              <IconButton
+                size="sm"
+                tone="danger"
+                label="Supprimer le dossier"
+                onClick={(e) => void handlePromptDelete(e, node.path, true)}
               >
                 <Trash2 className="w-3 h-3" />
-              </button>
-            </div>
+              </IconButton>
+            </span>
           </div>
 
-          {!isCollapsed && node.children.map((c) => renderNode(c, depth + 1))}
-        </div>
+          {!isCollapsed && (
+            <ul
+              role="group"
+              className="flex flex-col gap-gutter-xs mt-gutter-xs ml-gutter-sm pl-gutter-sm border-l border-outline-variant"
+            >
+              {node.children.map((c) => renderNode(c))}
+            </ul>
+          )}
+        </li>
       );
     }
 
     const isActive = node.path === activePath;
     const isRoot = node.path === rootFile;
-    const isImage = /\.(png|jpg|jpeg|gif|webp|svg)$/i.test(node.name);
-    const isBib = node.name.endsWith('.bib');
+    const isTex = node.name.endsWith('.tex');
 
     return (
-      <div
-        key={node.path}
-        onClick={() => onSelectFile(node.path)}
-        style={{ paddingLeft: `${depth * 12 + 18}px` }}
-        className={`group h-7 pr-2 flex items-center justify-between text-xs rounded-lg cursor-pointer select-none transition ${
-          isActive
-            ? 'bg-indigo-600/20 text-indigo-200 font-medium'
-            : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
-        }`}
-      >
-        <div className="flex items-center gap-1.5 min-w-0">
-          {isImage ? (
-            <FileImage className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-          ) : isBib ? (
-            <BookMarked className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-          ) : node.name.endsWith('.tex') ? (
-            <FileCode2 className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
-          ) : (
-            <FileText className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
-          )}
+      <li key={node.path} role="treeitem" aria-selected={isActive}>
+        <div onClick={() => onSelectFile(node.path)} className={cx(rowClass(isActive), 'pl-gutter-sm')}>
           <span className="truncate">{node.name}</span>
-          {isRoot && (
-            <span className="text-[9px] uppercase px-1.5 py-0.2 rounded bg-indigo-500/25 text-indigo-300 font-semibold shrink-0">
-              root
-            </span>
-          )}
-        </div>
 
-        <div className="hidden group-hover:flex items-center gap-0.5 shrink-0">
-          {node.name.endsWith('.tex') && !isRoot && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                void onSetRootFile(node.path);
-              }}
-              title="Définir comme fichier principal (root)"
-              className="p-1 rounded hover:bg-zinc-800 text-zinc-400 hover:text-amber-300 cursor-pointer"
-            >
-              <Star className="w-3 h-3" />
-            </button>
-          )}
-          <button
-            onClick={(e) => handlePromptRename(e, node.path)}
-            title="Renommer"
-            className="p-1 rounded hover:bg-zinc-800 text-zinc-400 cursor-pointer"
-          >
-            <Pencil className="w-3 h-3" />
-          </button>
-          {files.length > 1 && (
-            <button
-              onClick={(e) => handlePromptDelete(e, node.path)}
-              title="Supprimer"
-              className="p-1 rounded hover:bg-red-500/20 text-zinc-400 hover:text-red-400 cursor-pointer"
-            >
-              <Trash2 className="w-3 h-3" />
-            </button>
-          )}
+          <span className="flex items-center gap-1 shrink-0">
+            <span className={rowActions}>
+              {isTex && !isRoot && (
+                <IconButton
+                  size="sm"
+                  label="Définir comme root"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void onSetRootFile(node.path);
+                  }}
+                >
+                  <Star className="w-3 h-3" />
+                </IconButton>
+              )}
+              <IconButton
+                size="sm"
+                label="Renommer"
+                onClick={(e) => void handlePromptRename(e, node.path, false)}
+              >
+                <Pencil className="w-3 h-3" />
+              </IconButton>
+              {files.length > 1 && (
+                <IconButton
+                  size="sm"
+                  tone="danger"
+                  label="Supprimer"
+                  onClick={(e) => void handlePromptDelete(e, node.path, false)}
+                >
+                  <Trash2 className="w-3 h-3" />
+                </IconButton>
+              )}
+            </span>
+            {isRoot && (
+              <span
+                className="font-sans text-label-sm text-on-surface-variant"
+                title="Fichier principal (point d'entrée de la compilation)"
+              >
+                root
+              </span>
+            )}
+          </span>
         </div>
-      </div>
+      </li>
     );
   };
 
@@ -320,200 +337,194 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
           void onUploadFiles(e.dataTransfer.files);
         }
       }}
-      className={`h-full flex flex-col bg-zinc-950 border-r border-zinc-800/90 select-none ${
-        dragOver ? 'ring-2 ring-inset ring-indigo-500 bg-indigo-950/20' : ''
-      }`}
+      className={cx(
+        'h-full flex flex-col gap-gutter-md p-gutter-sm bg-surface select-none transition-colors duration-100',
+        dragOver && 'ring-2 ring-inset ring-primary bg-primary-container'
+      )}
     >
-      {/* Mode switcher */}
-      <div className="h-10 px-2 border-b border-zinc-800 flex items-center gap-1 shrink-0">
-        <button
-          onClick={() => setTab('files')}
-          className={`flex-1 py-1.5 rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 transition cursor-pointer ${
-            tab === 'files'
-              ? 'bg-zinc-800 text-zinc-100'
-              : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900'
-          }`}
-        >
-          <Folder className="w-3.5 h-3.5" />
-          Fichiers
-        </button>
-        <button
-          onClick={() => setTab('outline')}
-          className={`flex-1 py-1.5 rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 transition cursor-pointer ${
-            tab === 'outline'
-              ? 'bg-zinc-800 text-zinc-100'
-              : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900'
-          }`}
-        >
-          <ListTree className="w-3.5 h-3.5" />
-          Plan
-        </button>
-        <button
-          onClick={() => setTab('citations')}
-          className={`flex-1 py-1.5 rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 transition cursor-pointer ${
-            tab === 'citations'
-              ? 'bg-zinc-800 text-zinc-100'
-              : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900'
-          }`}
-        >
-          <BookMarked className="w-3.5 h-3.5" />
-          BibTeX
-        </button>
-      </div>
+      <Tabs
+        ariaLabel="Outils du projet"
+        className="px-gutter-xs border-b border-outline-variant shrink-0"
+        value={tab}
+        onChange={setTab}
+        items={[
+          { id: 'files', label: 'Fichiers' },
+          { id: 'outline', label: 'Plan' },
+          { id: 'citations', label: 'BibTeX' },
+        ]}
+      />
 
-      {/* Tab 1: Files */}
+      {/* Onglet Fichiers */}
       {tab === 'files' && (
-        <div className="flex-1 flex flex-col min-h-0">
-          <div className="px-2.5 py-2 flex items-center justify-between border-b border-zinc-900">
-            <span className="text-[11px] uppercase tracking-wider font-semibold text-zinc-500">
-              Arborescence
-            </span>
-            <div className="flex items-center gap-1">
-              <button
-                onClick={handlePromptNewFile}
-                title="Nouveau fichier (.tex, .bib, sous-dossier...)"
-                className="p-1.5 rounded-lg hover:bg-zinc-800 text-zinc-300 cursor-pointer"
-              >
-                <FilePlus2 className="w-3.5 h-3.5" />
-              </button>
-              <button
-                onClick={() => uploadInputRef.current?.click()}
-                title="Importer des fichiers ou images"
-                className="p-1.5 rounded-lg hover:bg-zinc-800 text-zinc-300 cursor-pointer"
-              >
-                <Upload className="w-3.5 h-3.5" />
-              </button>
-              <input
-                ref={uploadInputRef}
-                type="file"
-                multiple
-                className="hidden"
-                onChange={(e) => {
-                  if (e.target.files?.length) {
-                    void onUploadFiles(e.target.files);
-                    e.target.value = '';
-                  }
-                }}
-              />
+        <div className="flex-1 flex flex-col justify-between gap-gutter-md min-h-0">
+          <div className="flex flex-col gap-gutter-sm min-h-0">
+            <div className="flex items-center justify-between px-gutter-xs">
+              <span className="text-label-sm uppercase tracking-wider text-on-surface-variant">
+                Arborescence
+              </span>
+              <div className="flex items-center gap-gutter-xs">
+                <IconButton
+                  size="sm"
+                  label="Nouveau fichier (.tex, .bib, sous-dossier...)"
+                  onClick={() => void handlePromptNewFile()}
+                >
+                  <FilePlus2 className="w-3.5 h-3.5" />
+                </IconButton>
+                <IconButton
+                  size="sm"
+                  label="Importer des fichiers ou images"
+                  onClick={() => uploadInputRef.current?.click()}
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                </IconButton>
+                <input
+                  ref={uploadInputRef}
+                  type="file"
+                  multiple
+                  className="hidden"
+                  onChange={(e) => {
+                    if (e.target.files?.length) {
+                      void onUploadFiles(e.target.files);
+                      e.target.value = '';
+                    }
+                  }}
+                />
+              </div>
             </div>
+
+            <ul
+              role="tree"
+              aria-label="Fichiers du projet"
+              className="flex flex-col gap-gutter-xs overflow-y-auto font-mono text-code-sm font-normal"
+            >
+              {tree.map((node) => renderNode(node))}
+            </ul>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-1.5 space-y-0.5">
-            {tree.map((node) => renderNode(node, 0))}
-          </div>
-
-          <div className="p-2 border-t border-zinc-900 text-[10px] text-zinc-600 text-center">
-            Glisser-déposer des images/fichiers ici
-          </div>
+          <p className="px-gutter-xs text-body-sm text-on-surface-variant opacity-75">
+            Glisser-déposer des fichiers ici
+          </p>
         </div>
       )}
 
-      {/* Tab 2: Document Outline */}
+      {/* Onglet Plan */}
       {tab === 'outline' && (
-        <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
+        <div className="flex-1 overflow-y-auto">
           {outline.length === 0 ? (
-            <div className="text-xs text-zinc-500 text-center py-8 px-3">
-              Aucune section (<code>\section&#123;...&#125;</code>) détectée dans le projet.
-            </div>
+            <p className="text-body-sm text-on-surface-variant text-center py-8 px-3">
+              Aucune section (<code className="font-mono text-code-sm">\section&#123;...&#125;</code>)
+              détectée dans le projet.
+            </p>
           ) : (
-            outline.map((item, idx) => (
-              <button
-                key={`${item.file}:${item.line}:${idx}`}
-                onClick={() => onSelectFile(item.file, item.line)}
-                style={{ paddingLeft: `${Math.max(0, item.level - 1) * 12 + 10}px` }}
-                className="w-full text-left py-1.5 pr-2 rounded-lg hover:bg-zinc-900 text-xs text-zinc-300 hover:text-indigo-300 transition cursor-pointer flex flex-col"
-              >
-                <span className="truncate">{item.title}</span>
-                <span className="text-[10px] font-mono text-zinc-600">
-                  {item.file}:{item.line}
-                </span>
-              </button>
-            ))
+            <ul className="flex flex-col gap-gutter-xs">
+              {outline.map((item, idx) => {
+                const major = item.level <= 2;
+                const fileName = item.file.split('/').pop();
+                return (
+                  <li key={`${item.file}:${item.line}:${idx}`}>
+                    <button
+                      type="button"
+                      onClick={() => onSelectFile(item.file, item.line)}
+                      title={`${item.file}:${item.line}`}
+                      style={{ paddingLeft: `${4 + Math.max(0, item.level - 2) * 16}px` }}
+                      className="w-full flex items-center justify-between gap-2 pr-gutter-xs py-gutter-xs rounded-sm text-left hover:bg-surface-container transition-colors duration-100"
+                    >
+                      <span
+                        className={cx(
+                          'truncate',
+                          major ? 'text-body-md text-on-surface' : 'text-body-sm text-on-surface-variant'
+                        )}
+                      >
+                        {item.title}
+                      </span>
+                      <span className="font-mono text-code-sm font-normal text-on-surface-variant tabular-nums shrink-0">
+                        {item.file === rootFile ? '' : fileName}:{item.line}
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
           )}
         </div>
       )}
 
-      {/* Tab 3: Literature Search (arXiv & Crossref) */}
+      {/* Onglet BibTeX : recherche arXiv & Crossref */}
       {tab === 'citations' && (
-        <div className="flex-1 flex flex-col min-h-0">
-          <form onSubmit={handleSearchCitations} className="p-2.5 border-b border-zinc-900 space-y-2">
-            <div className="relative">
+        <div className="flex-1 flex flex-col gap-gutter-sm min-h-0">
+          <form onSubmit={handleSearchCitations} className="flex flex-col gap-gutter-xs">
+            <div className="flex items-center gap-gutter-xs">
               <input
-                type="text"
+                type="search"
+                aria-label="Rechercher une publication"
                 value={citeQuery}
                 onChange={(e) => setCiteQuery(e.target.value)}
-                placeholder="Titre, auteur, DOI, arXiv..."
-                className="w-full pl-8 pr-3 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 text-xs text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-indigo-500"
+                placeholder="Titre, auteur, DOI..."
+                className={cx(inputClass, 'h-7 px-gutter-sm rounded-sm bg-surface-container-low text-body-sm')}
               />
-              <Search className="w-3.5 h-3.5 text-zinc-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
-            </div>
-
-            <div className="flex items-center justify-between gap-1">
-              <div className="flex items-center gap-1 text-[11px]">
-                {(['all', 'arxiv', 'crossref'] as const).map((src) => (
-                  <button
-                    type="button"
-                    key={src}
-                    onClick={() => setCiteSource(src)}
-                    className={`px-2 py-0.5 rounded capitalize cursor-pointer ${
-                      citeSource === src
-                        ? 'bg-indigo-600/30 text-indigo-300 border border-indigo-500/40'
-                        : 'text-zinc-500 hover:text-zinc-300'
-                    }`}
-                  >
-                    {src === 'all' ? 'Tous' : src}
-                  </button>
-                ))}
-              </div>
-
               <button
                 type="submit"
+                aria-label="Chercher"
+                title="Chercher"
                 disabled={citeLoading}
-                className="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-[11px] font-medium text-white cursor-pointer"
+                className="h-7 w-8 shrink-0 inline-flex items-center justify-center rounded-sm bg-primary text-on-primary hover:bg-primary-hover disabled:opacity-60 transition-colors duration-100"
               >
-                {citeLoading ? '...' : 'Chercher'}
+                {citeLoading ? <Spinner className="w-3.5 h-3.5 text-on-primary" /> : <Search className="w-4 h-4" />}
               </button>
+            </div>
+
+            <div className="flex items-center gap-gutter-xs" role="radiogroup" aria-label="Source">
+              {(['all', 'arxiv', 'crossref'] as const).map((src) => (
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={citeSource === src}
+                  key={src}
+                  onClick={() => setCiteSource(src)}
+                  className={cx(
+                    'h-5 px-1.5 rounded-sm text-label-sm transition-colors duration-100',
+                    citeSource === src
+                      ? 'bg-surface-container-high text-on-surface'
+                      : 'text-on-surface-variant hover:text-on-surface'
+                  )}
+                >
+                  {src === 'all' ? 'Tous' : src === 'arxiv' ? 'arXiv' : 'Crossref'}
+                </button>
+              ))}
             </div>
           </form>
 
-          <div className="flex-1 overflow-y-auto p-2 space-y-2">
+          <div className="flex-1 overflow-y-auto flex flex-col gap-gutter-sm">
             {citeLoading ? (
-              <div className="py-10 flex flex-col items-center gap-2 text-zinc-500 text-xs">
-                <Loader2 className="w-5 h-5 animate-spin text-indigo-400" />
+              <div className="py-10 flex flex-col items-center gap-2 text-body-sm text-on-surface-variant">
+                <Spinner />
                 Interrogation d'arXiv & Crossref...
               </div>
             ) : citeResults.length === 0 ? (
-              <div className="py-8 px-3 text-center text-xs text-zinc-500">
-                Recherche un article scientifique pour l'ajouter automatiquement à{' '}
-                <code>references.bib</code> et insérer <code>\cite&#123;...&#125;</code>.
-              </div>
+              <p className="py-8 px-2 text-center text-body-sm text-on-surface-variant">
+                Recherche un article scientifique pour l'ajouter à{' '}
+                <code className="font-mono text-code-sm text-on-surface">references.bib</code> et insérer{' '}
+                <code className="font-mono text-code-sm text-on-surface">\cite&#123;...&#125;</code>.
+              </p>
             ) : (
               citeResults.map((item) => (
-                <div
+                <article
                   key={item.id}
-                  className="p-2.5 rounded-xl bg-zinc-900/70 border border-zinc-800/90 space-y-1.5 text-xs"
+                  className="flex flex-col gap-gutter-xs p-gutter-sm rounded-lg bg-surface-container-low border border-outline-variant"
                 >
-                  <div className="flex items-start justify-between gap-2">
-                    <span className="font-medium text-zinc-200 leading-snug">{item.title}</span>
-                    <span
-                      className={`text-[10px] px-1.5 py-0.5 rounded uppercase font-mono shrink-0 ${
-                        item.source === 'arxiv'
-                          ? 'bg-rose-500/15 text-rose-300'
-                          : 'bg-sky-500/15 text-sky-300'
-                      }`}
-                    >
-                      {item.source}
-                    </span>
-                  </div>
-
-                  <p className="text-[11px] text-zinc-400 line-clamp-1">
+                  <span className="text-label-sm text-tertiary">
+                    {item.source === 'arxiv' ? 'arXiv' : 'Crossref'}
+                    {item.year ? ` • ${item.year}` : ''}
+                  </span>
+                  <h4 className="text-label-md text-on-surface">{item.title}</h4>
+                  <p className="text-body-sm text-on-surface-variant line-clamp-1">
                     {item.authors.slice(0, 3).join(', ')}
                     {item.authors.length > 3 ? ' et al.' : ''}
-                    {item.year ? ` (${item.year})` : ''}
                   </p>
 
-                  <div className="pt-1 flex items-center justify-between gap-1">
+                  <div className="mt-gutter-xs flex items-center gap-gutter-xs">
                     <button
+                      type="button"
                       onClick={async () => {
                         try {
                           await onInsertCitation(item);
@@ -523,52 +534,46 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
                         setInsertedId(item.id);
                         setTimeout(() => setInsertedId(null), 1600);
                       }}
-                      className="px-2 py-1 rounded-lg bg-indigo-600/25 hover:bg-indigo-600/40 text-indigo-200 text-[11px] font-medium flex items-center gap-1 transition cursor-pointer"
+                      title="Ajouter à references.bib et insérer \cite au curseur"
+                      className="flex-1 h-6 inline-flex items-center justify-center gap-1 px-gutter-sm rounded-sm bg-secondary-container text-on-secondary-container font-mono text-code-sm hover:bg-surface-container-highest transition-colors duration-100"
                     >
                       {insertedId === item.id ? (
                         <>
-                          <Check className="w-3 h-3 text-emerald-400" />
-                          Ajouté !
+                          <Check className="w-3 h-3 text-success" />
+                          <span className="font-sans text-label-sm">Ajouté</span>
                         </>
                       ) : (
-                        <>
-                          <Plus className="w-3 h-3" />
-                          .bib & \cite
-                        </>
+                        '.bib & \\cite'
                       )}
                     </button>
-
-                    <div className="flex items-center gap-1">
-                      <button
-                        onClick={() => {
-                          void navigator.clipboard.writeText(item.bibtex);
-                          setCopiedId(item.id);
-                          setTimeout(() => setCopiedId(null), 1400);
-                        }}
-                        title="Copier l'entrée BibTeX"
-                        className="p-1 rounded hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 cursor-pointer"
-                      >
-                        {copiedId === item.id ? (
-                          <Check className="w-3.5 h-3.5 text-emerald-400" />
-                        ) : (
-                          <Copy className="w-3.5 h-3.5" />
-                        )}
-                      </button>
-
-                      {item.url && (
-                        <a
-                          href={item.url}
-                          target="_blank"
-                          rel="noreferrer"
-                          title="Ouvrir la source"
-                          className="p-1 rounded hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200"
-                        >
-                          <ExternalLink className="w-3.5 h-3.5" />
-                        </a>
+                    <IconButton
+                      size="sm"
+                      label="Copier l'entrée BibTeX"
+                      onClick={() => {
+                        void navigator.clipboard.writeText(item.bibtex);
+                        setCopiedId(item.id);
+                        setTimeout(() => setCopiedId(null), 1400);
+                      }}
+                    >
+                      {copiedId === item.id ? (
+                        <Check className="w-3.5 h-3.5 text-success" />
+                      ) : (
+                        <Copy className="w-3.5 h-3.5" />
                       )}
-                    </div>
+                    </IconButton>
+                    {item.url && (
+                      <IconButton
+                        size="sm"
+                        label="Ouvrir la source"
+                        href={item.url}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </IconButton>
+                    )}
                   </div>
-                </div>
+                </article>
               ))
             )}
           </div>

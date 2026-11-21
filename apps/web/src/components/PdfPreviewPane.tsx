@@ -1,15 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
-import {
-  Download,
-  FileText,
-  Loader2,
-  MousePointerClick,
-  ZoomIn,
-  ZoomOut,
-} from 'lucide-react';
+import { Download, FileText, MousePointerClick, ZoomIn, ZoomOut } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import type { SyncTeXForwardResult } from '@prism-latex/shared';
+import { Button, IconButton, Kbd, Spinner } from './ui';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   'pdfjs-dist/build/pdf.worker.min.mjs',
@@ -174,79 +168,78 @@ export const PdfPreviewPane: React.FC<PdfPreviewPaneProps> = ({
   };
 
   return (
-    <div className="flex flex-col h-full bg-zinc-900/60 min-w-0">
-      {/* PDF Toolbar */}
-      <div className="h-10 px-3 border-b border-zinc-800 bg-zinc-900/90 flex items-center justify-between text-xs shrink-0">
-        <div className="flex items-center gap-2">
-          <button
+    <div className="flex flex-col h-full bg-surface-container-low min-w-0">
+      {/* Barre d'outils PDF */}
+      <div className="h-10 px-gutter-md border-b border-outline-variant flex items-center justify-between gap-gutter-sm shrink-0">
+        <div className="flex items-center gap-gutter-xs">
+          <IconButton
+            size="sm"
+            label="Zoom arrière"
+            className="w-7 h-7"
             onClick={() => setScale((s) => Math.max(0.5, Number((s - 0.15).toFixed(2))))}
-            title="Zoom arrière"
-            className="p-1 rounded hover:bg-zinc-800 text-zinc-300 cursor-pointer"
           >
-            <ZoomOut className="w-3.5 h-3.5" />
-          </button>
-          <span className="font-mono text-[11px] text-zinc-300 w-12 text-center">
-            {Math.round(scale * 100)}%
+            <ZoomOut className="w-4 h-4" />
+          </IconButton>
+          <span className="font-mono text-code-sm text-on-surface px-gutter-xs min-w-[3.25rem] text-center tabular-nums">
+            {Math.round(scale * 100)} %
           </span>
-          <button
+          <IconButton
+            size="sm"
+            label="Zoom avant"
+            className="w-7 h-7"
             onClick={() => setScale((s) => Math.min(2.6, Number((s + 0.15).toFixed(2))))}
-            title="Zoom avant"
-            className="p-1 rounded hover:bg-zinc-800 text-zinc-300 cursor-pointer"
           >
-            <ZoomIn className="w-3.5 h-3.5" />
-          </button>
+            <ZoomIn className="w-4 h-4" />
+          </IconButton>
           {pages.length > 0 && (
-            <span className="text-[11px] text-zinc-500 ml-2">
+            <span className="text-body-sm text-on-surface-variant ml-gutter-sm tabular-nums">
               {pages.length} page{pages.length > 1 ? 's' : ''}
             </span>
           )}
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-gutter-sm">
           {hasSyncTex && (
             <span
               title="Ctrl+Clic (ou double-clic) sur le PDF pour sauter à la ligne LaTeX"
-              className="hidden xl:inline-flex items-center gap-1 text-[11px] text-zinc-400 bg-zinc-800/70 px-2 py-0.5 rounded"
+              className="hidden 2xl:inline-flex items-center gap-1.5 text-label-sm text-outline"
             >
-              <MousePointerClick className="w-3 h-3 text-indigo-400" />
-              Ctrl+Clic → Code
+              <MousePointerClick className="w-3.5 h-3.5" />
+              Ctrl+Clic → code
             </span>
           )}
 
-          {compiling && (
-            <Loader2 className="w-3.5 h-3.5 text-indigo-400 animate-spin" />
-          )}
+          {compiling && <Spinner className="w-3.5 h-3.5" />}
 
-          <button
+          <Button
+            size="sm"
+            variant="ghost"
             onClick={handleDownloadPdf}
             disabled={!pdfBytes}
             title="Télécharger le PDF compilé"
-            className="px-2.5 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 disabled:opacity-40 text-zinc-200 flex items-center gap-1.5 transition cursor-pointer"
+            icon={<Download className="w-4 h-4" />}
+            className="px-gutter-sm"
           >
-            <Download className="w-3.5 h-3.5" />
             PDF
-          </button>
+          </Button>
         </div>
       </div>
 
-      {/* Scrollable Pages Area */}
-      <div ref={scrollRef} className="flex-1 overflow-auto p-6 flex flex-col items-center gap-6">
+      {/* Pages */}
+      <div ref={scrollRef} className="flex-1 overflow-auto p-gutter-lg flex flex-col items-start gap-gutter-lg">
         {!pdfBytes ? (
-          <div className="my-auto text-center max-w-xs text-zinc-500">
+          <div className="m-auto text-center max-w-xs text-on-surface-variant">
             {compiling ? (
               <div className="flex flex-col items-center gap-3">
-                <Loader2 className="w-8 h-8 text-indigo-400 animate-spin" />
-                <p className="text-xs text-zinc-300">
-                  Compilation WebAssembly en cours dans le navigateur...
-                </p>
+                <Spinner className="w-6 h-6" />
+                <p className="text-body-md">Compilation WebAssembly en cours dans le navigateur...</p>
               </div>
             ) : (
-              <div className="flex flex-col items-center gap-2">
-                <FileText className="w-10 h-10 text-zinc-700" />
-                <p className="text-xs text-zinc-400">
-                  Clique sur <strong className="text-zinc-200">Compiler</strong> (ou{' '}
-                  <kbd className="px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-300">Ctrl+Entrée</kbd>)
-                  pour générer l'aperçu PDF en temps réel.
+              <div className="flex flex-col items-center gap-3">
+                <FileText className="w-8 h-8 text-outline" />
+                <p className="text-body-md">
+                  Clique sur <strong className="text-on-surface font-semibold">Compiler</strong> (ou{' '}
+                  <Kbd>Ctrl+Entrée</Kbd>) pour générer l'aperçu PDF.
                 </p>
               </div>
             )}
@@ -266,7 +259,7 @@ export const PdfPreviewPane: React.FC<PdfPreviewPaneProps> = ({
                   width: `${Math.floor(m.widthPt * scale)}px`,
                   height: `${Math.floor(m.heightPt * scale)}px`,
                 }}
-                className="relative bg-white shadow-2xl shadow-black/60 rounded-sm shrink-0 select-none"
+                className="relative mx-auto bg-sheet shadow-sheet shrink-0 select-none"
               >
                 <canvas
                   ref={(el) => {
@@ -288,7 +281,7 @@ export const PdfPreviewPane: React.FC<PdfPreviewPaneProps> = ({
                       )}px`,
                       height: `${Math.max(18, forwardHighlight.height * scale + 4)}px`,
                     }}
-                    className="absolute bg-indigo-500/35 border border-indigo-500 rounded synctex-highlight"
+                    className="absolute bg-primary/20 border border-primary rounded-sm synctex-highlight"
                   />
                 )}
               </div>

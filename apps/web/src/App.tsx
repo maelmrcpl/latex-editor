@@ -1,11 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { Loader2 } from 'lucide-react';
 import type { AuthUser } from '@prism-latex/shared';
 import { AdminPanel } from './components/AdminPanel';
 import { LoginScreen } from './components/LoginScreen';
 import { PendingApprovalScreen } from './components/PendingApprovalScreen';
 import { ProjectDashboard } from './components/ProjectDashboard';
 import { WorkspaceView } from './components/WorkspaceView';
+import { LoadingScreen } from './components/ui';
 import { api } from './lib/api';
 
 export const App: React.FC = () => {
@@ -16,6 +16,8 @@ export const App: React.FC = () => {
     return m ? m[1] : null;
   });
   const [showAdmin, setShowAdmin] = useState(() => window.location.hash === '#/admin');
+  /** « Nouveau projet » demandé depuis la page Utilisateurs : ouvert à l'arrivée sur le tableau de bord */
+  const [pendingCreate, setPendingCreate] = useState(false);
 
   useEffect(() => {
     const onHashChange = () => {
@@ -58,12 +60,7 @@ export const App: React.FC = () => {
   };
 
   if (checkingAuth) {
-    return (
-      <div className="min-h-screen bg-zinc-950 text-zinc-400 flex items-center justify-center gap-2 text-sm">
-        <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />
-        Initialisation...
-      </div>
-    );
+    return <LoadingScreen label="Initialisation..." />;
   }
 
   if (!user) {
@@ -75,7 +72,17 @@ export const App: React.FC = () => {
   }
 
   if (showAdmin && user.role === 'admin') {
-    return <AdminPanel currentUser={user} onBack={closeProject} />;
+    return (
+      <AdminPanel
+        currentUser={user}
+        onBack={closeProject}
+        onNewProject={() => {
+          setPendingCreate(true);
+          closeProject();
+        }}
+        onLogout={handleLogout}
+      />
+    );
   }
 
   if (activeProjectId) {
@@ -88,6 +95,8 @@ export const App: React.FC = () => {
       onOpenProject={openProject}
       onOpenAdmin={openAdmin}
       onLogout={handleLogout}
+      autoOpenCreate={pendingCreate}
+      onAutoOpenHandled={() => setPendingCreate(false)}
     />
   );
 };

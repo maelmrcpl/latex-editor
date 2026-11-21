@@ -417,72 +417,182 @@ export function createLatexCompletionSource(getFiles: () => ProjectFileEntry[]) 
   };
 }
 
-export const prismDarkHighlight = HighlightStyle.define([
-  { tag: t.comment, color: '#71717a', fontStyle: 'italic' },
-  { tag: t.keyword, color: '#a78bfa', fontWeight: '600' },
-  { tag: t.heading, color: '#38bdf8', fontWeight: '700' },
-  { tag: t.atom, color: '#fbbf24' },
-  { tag: t.tagName, color: '#818cf8' },
-  { tag: t.operator, color: '#34d399' },
-  { tag: t.variableName, color: '#6ee7b7' },
-  { tag: t.number, color: '#f472b6' },
-  { tag: t.definition(t.variableName), color: '#c084fc', fontWeight: '600' },
-  { tag: t.brace, color: '#a1a1aa' },
-  { tag: t.squareBracket, color: '#94a3b8' },
+// Couleurs pilotées par les variables CSS du thème (styles.css) : bascule clair / sombre sans recréer l'éditeur
+export const syntexHighlight = HighlightStyle.define([
+  { tag: t.comment, color: 'var(--sx-syntax-comment)', fontStyle: 'italic' },
+  { tag: t.keyword, color: 'var(--sx-syntax-keyword)', fontWeight: '600' },
+  { tag: t.heading, color: 'var(--sx-syntax-heading)', fontWeight: '700' },
+  { tag: t.atom, color: 'var(--sx-syntax-atom)' },
+  { tag: t.tagName, color: 'var(--sx-syntax-command)' },
+  { tag: t.operator, color: 'var(--sx-syntax-math)' },
+  { tag: t.variableName, color: 'var(--sx-syntax-variable)' },
+  { tag: t.number, color: 'var(--sx-syntax-number)' },
+  { tag: t.definition(t.variableName), color: 'var(--sx-syntax-definition)', fontWeight: '600' },
+  { tag: t.brace, color: 'var(--sx-syntax-brace)' },
+  { tag: t.squareBracket, color: 'var(--sx-syntax-bracket)' },
 ]);
 
-export const prismDarkEditorTheme = EditorView.theme(
-  {
-    '&': {
-      backgroundColor: '#09090b',
-      color: '#e4e4e7',
-    },
-    '.cm-content': {
-      caretColor: '#818cf8',
-      padding: '12px 0',
-      lineHeight: '1.65',
-    },
-    '.cm-cursor, .cm-dropCursor': {
-      borderLeftColor: '#818cf8',
-      borderLeftWidth: '2px',
-    },
-    '&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection': {
-      backgroundColor: 'rgba(99, 102, 241, 0.25)',
-    },
-    '.cm-gutters': {
-      backgroundColor: '#09090b',
-      color: '#52525b',
-      borderRight: '1px solid #18181b',
-      paddingRight: '4px',
-    },
-    '.cm-activeLineGutter': {
-      backgroundColor: 'rgba(39, 39, 42, 0.5)',
-      color: '#a1a1aa',
-    },
-    '.cm-activeLine': {
-      backgroundColor: 'rgba(39, 39, 42, 0.35)',
-    },
-    '.cm-tooltip': {
-      backgroundColor: '#18181b',
-      border: '1px solid #27272a',
-      color: '#e4e4e7',
-      borderRadius: '8px',
-      boxShadow: '0 10px 25px rgba(0, 0, 0, 0.5)',
-    },
-    '.cm-tooltip-autocomplete > ul > li[aria-selected]': {
-      backgroundColor: 'rgba(99, 102, 241, 0.25)',
-      color: '#ffffff',
-    },
+export const syntexEditorTheme = EditorView.theme({
+  '&': {
+    backgroundColor: 'var(--sx-surface-container-lowest)',
+    color: 'var(--sx-on-surface)',
   },
-  { dark: true }
-);
+  '.cm-scroller': {
+    fontFamily: 'var(--font-mono)',
+    lineHeight: '28px',
+  },
+  '.cm-content': {
+    caretColor: 'var(--sx-primary)',
+    padding: '24px 0',
+  },
+  '.cm-line': {
+    padding: '0 8px',
+  },
+  '.cm-cursor, .cm-dropCursor': {
+    borderLeftColor: 'var(--sx-primary)',
+    borderLeftWidth: '2px',
+  },
+  '&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection': {
+    backgroundColor: 'color-mix(in oklab, var(--sx-primary) 28%, transparent)',
+  },
+  '.cm-selectionMatch': {
+    backgroundColor: 'color-mix(in oklab, var(--sx-primary) 14%, transparent)',
+  },
+  '&.cm-focused .cm-matchingBracket': {
+    backgroundColor: 'color-mix(in oklab, var(--sx-primary) 22%, transparent)',
+    outline: 'none',
+  },
+  '.cm-gutters': {
+    backgroundColor: 'var(--sx-surface-container-lowest)',
+    color: 'var(--sx-outline)',
+    border: 'none',
+    paddingLeft: '8px',
+  },
+  '.cm-lineNumbers .cm-gutterElement': {
+    minWidth: '28px',
+    padding: '0 8px 0 0',
+    fontVariantNumeric: 'tabular-nums',
+  },
+  '.cm-activeLineGutter': {
+    backgroundColor: 'var(--sx-surface-container-low)',
+    color: 'var(--sx-primary-text)',
+  },
+  '.cm-activeLine': {
+    backgroundColor: 'var(--sx-surface-container-low)',
+  },
+  // Marqueurs de pliage visibles seulement au survol de la gouttière
+  '.cm-foldGutter .cm-gutterElement': {
+    opacity: '0',
+    transition: 'opacity 100ms ease-out',
+    color: 'var(--sx-on-surface-variant)',
+  },
+  '.cm-gutters:hover .cm-foldGutter .cm-gutterElement': {
+    opacity: '1',
+  },
+  // Erreurs / avertissements : simple point coloré dans la gouttière
+  '.cm-gutter-lint': {
+    width: '10px',
+  },
+  '.cm-gutter-lint .cm-gutterElement': {
+    padding: '0',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  '.cm-lint-marker': {
+    width: '6px',
+    height: '6px',
+    borderRadius: '9999px',
+    backgroundImage: 'none',
+    content: 'none',
+  },
+  '.cm-lint-marker-error': { backgroundColor: 'var(--sx-error)' },
+  '.cm-lint-marker-warning': { backgroundColor: 'var(--sx-warning)' },
+  '.cm-lint-marker-info': { backgroundColor: 'var(--sx-outline)' },
+  '.cm-lintRange-error, .cm-lintRange-warning, .cm-lintRange-info': {
+    backgroundImage: 'none',
+  },
+  '.cm-foldPlaceholder': {
+    backgroundColor: 'var(--sx-surface-container-high)',
+    border: 'none',
+    color: 'var(--sx-on-surface-variant)',
+    borderRadius: '4px',
+    padding: '0 4px',
+  },
+  '.cm-tooltip': {
+    backgroundColor: 'var(--sx-surface-bright)',
+    border: '1px solid var(--sx-outline-variant)',
+    color: 'var(--sx-on-surface)',
+    borderRadius: '8px',
+    boxShadow: 'var(--shadow-overlay)',
+    overflow: 'hidden',
+  },
+  '.cm-tooltip-autocomplete > ul': {
+    fontFamily: 'var(--font-mono)',
+    fontSize: '12px',
+  },
+  '.cm-tooltip-autocomplete > ul > li': {
+    padding: '2px 8px !important',
+  },
+  '.cm-tooltip-autocomplete > ul > li[aria-selected]': {
+    backgroundColor: 'var(--sx-primary-container)',
+    color: 'var(--sx-on-primary-container)',
+  },
+  '.cm-completionDetail': {
+    color: 'var(--sx-on-surface-variant)',
+    fontStyle: 'normal',
+    fontFamily: 'var(--font-sans)',
+    marginLeft: '8px',
+  },
+  '.cm-completionMatchedText': {
+    textDecoration: 'none',
+    color: 'var(--sx-primary-text)',
+    fontWeight: '600',
+  },
+  '.cm-diagnostic': {
+    fontFamily: 'var(--font-sans)',
+    fontSize: '12px',
+    padding: '6px 10px',
+  },
+  '.cm-diagnostic-error': { borderLeftColor: 'var(--sx-error)' },
+  '.cm-diagnostic-warning': { borderLeftColor: 'var(--sx-warning)' },
+  '.cm-panels': {
+    backgroundColor: 'var(--sx-surface-container)',
+    color: 'var(--sx-on-surface)',
+  },
+  '.cm-panels.cm-panels-top': { borderBottom: '1px solid var(--sx-outline-variant)' },
+  '.cm-panels.cm-panels-bottom': { borderTop: '1px solid var(--sx-outline-variant)' },
+  '.cm-search': {
+    fontFamily: 'var(--font-sans)',
+    fontSize: '12px',
+  },
+  '.cm-textfield': {
+    backgroundColor: 'var(--sx-surface-container-lowest)',
+    border: '1px solid var(--sx-outline-variant)',
+    borderRadius: '4px',
+    color: 'var(--sx-on-surface)',
+  },
+  '.cm-button': {
+    backgroundImage: 'none',
+    backgroundColor: 'var(--sx-surface-container-high)',
+    border: '1px solid var(--sx-outline-variant)',
+    borderRadius: '4px',
+    color: 'var(--sx-on-surface)',
+  },
+  '.cm-searchMatch': {
+    backgroundColor: 'color-mix(in oklab, var(--sx-warning) 25%, transparent)',
+  },
+  '.cm-searchMatch.cm-searchMatch-selected': {
+    backgroundColor: 'color-mix(in oklab, var(--sx-primary) 35%, transparent)',
+  },
+});
 
 export function createLatexExtensions(getFiles: () => ProjectFileEntry[]): Extension[] {
   return [
     latexStreamLanguage,
     latexFoldService,
-    syntaxHighlighting(prismDarkHighlight),
-    prismDarkEditorTheme,
+    syntaxHighlighting(syntexHighlight),
+    syntexEditorTheme,
     autocompletion({
       override: [createLatexCompletionSource(getFiles)],
       activateOnTyping: true,

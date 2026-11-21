@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { ShieldCheck } from 'lucide-react';
 import { api } from '../lib/api';
-import { SynTeXLogo } from './SynTeXLogo';
+import { AuthCard } from './AuthCard';
+import { Alert, Button } from './ui';
 
 const AUTH_ERROR_MESSAGES: Record<string, string> = {
   not_configured:
@@ -57,47 +58,36 @@ export const LoginScreen: React.FC = () => {
   }, []);
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col items-center justify-center p-4 relative overflow-hidden">
-      {/* SynTeX brand radial glow */}
-      <div className="pointer-events-none absolute -top-40 left-1/2 -translate-x-1/2 w-[650px] h-[380px] bg-[#5236FF]/20 blur-[130px] rounded-full" />
-
-      <div className="w-full max-w-md bg-zinc-900/80 backdrop-blur-xl border border-zinc-800/90 rounded-2xl shadow-2xl p-8 relative z-10">
-        <div className="mb-7">
-          <SynTeXLogo variant="stacked" showTagline />
-        </div>
-
-        <div className="space-y-4">
-          <p className="text-sm text-zinc-400 text-center">
-            Connecte-toi avec ton compte Google. Les nouveaux comptes doivent être validés par
-            l'administrateur avant de pouvoir utiliser SynTeX.
-          </p>
-
-          {(error || !googleEnabled) && (
-            <div className="px-3.5 py-2.5 rounded-xl bg-red-500/10 border border-red-500/30 text-xs text-red-300">
-              {error ?? AUTH_ERROR_MESSAGES.not_configured}
-            </div>
-          )}
-
-          <a
-            href={api.auth.googleStartUrl}
-            aria-disabled={!googleEnabled}
-            className={`w-full py-2.5 px-4 rounded-xl bg-white hover:bg-zinc-100 text-sm font-medium text-zinc-900 flex items-center justify-center gap-2.5 shadow-lg transition ${
-              googleEnabled ? '' : 'opacity-50 pointer-events-none'
-            }`}
-          >
-            <GoogleIcon />
-            Continuer avec Google
-          </a>
-        </div>
-
-        <div className="mt-6 pt-5 border-t border-zinc-800/80 flex items-center justify-between text-[11px] text-zinc-500">
-          <span className="flex items-center gap-1.5">
-            <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+    <AuthCard
+      footer={
+        <>
+          <span className="flex items-center gap-1.5 text-label-sm text-on-surface-variant">
+            <ShieldCheck className="w-3.5 h-3.5 text-success" />
             Accès sur validation
           </span>
-          <span className="font-mono text-zinc-600">SynTeX • WASM</span>
-        </div>
+          <span className="font-mono text-code-sm text-outline">SynTeX • WASM</span>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        <p className="text-body-md text-on-surface-variant text-center">
+          Connecte-toi avec ton compte Google. Les nouveaux comptes doivent être validés par
+          l'administrateur avant de pouvoir utiliser SynTeX.
+        </p>
+
+        {(error || !googleEnabled) && <Alert>{error ?? AUTH_ERROR_MESSAGES.not_configured}</Alert>}
+
+        <Button
+          href={api.auth.googleStartUrl}
+          aria-disabled={!googleEnabled}
+          size="lg"
+          variant="secondary"
+          icon={<GoogleIcon />}
+          className="w-full"
+        >
+          Continuer avec Google
+        </Button>
       </div>
-    </div>
+    </AuthCard>
   );
 };
